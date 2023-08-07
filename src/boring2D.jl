@@ -1,5 +1,21 @@
 module boring2D
 
-# Write your package code here.
+export Mesh2D, readSU2
+
+struct Mesh2D
+    " [nNodes,2 Float64] Node locations (X,Y)."
+    nodes::Matrix{Float64}
+
+    "[nNodes,3 Int32] Edge nodes numbers and boundary number."
+    edges::Matrix{Int32}
+
+    "[nSurfTrias,3 Int32] Node indices for triangular boundary surface faces."
+    triangles::Matrix{Int32}
+
+    # "Internal constructor"
+    # Gmf() = new()
+end
+
+include("meshIO.jl")
 
 end
