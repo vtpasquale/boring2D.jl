@@ -1,6 +1,6 @@
 module boring2D
 
-export Mesh2D, readMesh
+export Mesh2D, readMesh, writeMesh
 
 struct Mesh2D
     " [nNodes,2 Float64] Node locations (X,Y)."
