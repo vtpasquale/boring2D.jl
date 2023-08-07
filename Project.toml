@@ -1,0 +1,13 @@
+name = "boring2D"
+uuid = "aa173634-464f-43d4-a2d8-57f7a596677e"
+authors = ["Anthony Ricciardi"]
+version = "1.0.0-DEV"
+
+[compat]
+julia = "1"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
