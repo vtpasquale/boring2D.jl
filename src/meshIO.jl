@@ -71,9 +71,6 @@ function writeMeshFormat(meshFileName::AbstractString,format::AbstractString,mes
     elseif format=="vtk"
         writeMeshio(meshFileName::AbstractString,mesh::Mesh2D)
         return 0
-    elseif format=="ugrid"
-        writeMeshio(meshFileName::AbstractString,mesh::Mesh2D)
-        return 0
     elseif format=="nas"
         writeMeshio(meshFileName::AbstractString,mesh::Mesh2D)
         return 0
@@ -85,15 +82,19 @@ function writeMeshFormat(meshFileName::AbstractString,format::AbstractString,mes
 end
 
 function writeMeshio(meshFileName::AbstractString,mesh::Mesh2D)
-    points = mesh.nodes
-    cells = [("triangle",mesh.triangles.-1)]
-
     py"""
+    import numpy as np
     import meshio
+    def pyWriteMeshIo(meshFileName,mesh):
+        nTriangles = np.size(mesh.triangles,0)
+        points = mesh.nodes
+        cells = [("triangle",mesh.triangles-1),("line",mesh.edges[:,0:2]-1)]
+        cell_data_out = {"su2:tag": [np.zeros(nTriangles,dtype=int),mesh.edges[:,2]]}
+        m = meshio.Mesh(points,cells,cell_data=cell_data_out)
+        m.write(meshFileName)
+        return 0
     """
-    m = py"meshio.Mesh"(points,cells)
-    m.write(meshFileName)
-
+    py"pyWriteMeshIo"(meshFileName,mesh)
     return 0
 end
 
