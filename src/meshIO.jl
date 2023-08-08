@@ -51,42 +51,42 @@ end
 
 function readPLT(filename::String)
     # Construct from CBSFlow ascii file
-    fid = open(filename,"r");
+    fid = open(filename,"r")
                 
     # Process header
-    getLine = readline(fid);
-    splitLine = split(strip(getLine));  
-    nTriangles = parse(Int32,splitLine[1]);
-    nNodes = parse(Int32,splitLine[2]);
-    nEdges = parse(Int32,splitLine[3]);
+    getLine = readline(fid)
+    splitLine = split(strip(getLine))  
+    nTriangles = parse(Int32,splitLine[1])
+    nNodes = parse(Int32,splitLine[2])
+    nEdges = parse(Int32,splitLine[3])
 
     # Read triangles
     tri = Array{Int32}(undef,nTriangles,3)
     for i = 1:nTriangles
-        splitLine = split(strip(readline(fid)));
-        tri[i,1] = parse(Int32,splitLine[2]);
-        tri[i,2] = parse(Int32,splitLine[3]);
-        tri[i,3] = parse(Int32,splitLine[4]);
+        splitLine = split(strip(readline(fid)))
+        tri[i,1] = parse(Int32,splitLine[2])
+        tri[i,2] = parse(Int32,splitLine[3])
+        tri[i,3] = parse(Int32,splitLine[4])
     end
     
     # Read nodes
     nodes = Array{Float64}(undef,nNodes,2)
     for i = 1:nNodes
-        splitLine = split(strip(readline(fid)));
-        nodes[i,1] = parse(Float64,splitLine[2]);
-        nodes[i,2] = parse(Float64,splitLine[3]);
+        splitLine = split(strip(readline(fid)))
+        nodes[i,1] = parse(Float64,splitLine[2])
+        nodes[i,2] = parse(Float64,splitLine[3])
     end
 
     # Read edges
     edges = Array{Int32}(undef,nEdges,3)
     for i = 1:nEdges
-        splitLine = split(strip(readline(fid)));
-        edges[i,1] = parse(Int32,splitLine[1]);
-        edges[i,2] = parse(Int32,splitLine[2]);
-        edges[i,3] = parse(Int32,splitLine[4]);
+        splitLine = split(strip(readline(fid)))
+        edges[i,1] = parse(Int32,splitLine[1])
+        edges[i,2] = parse(Int32,splitLine[2])
+        edges[i,3] = parse(Int32,splitLine[4])
     end
     
-    close(fid);
+    close(fid)
     return Mesh2D(nodes,edges,tri)
 end
 
@@ -140,6 +140,23 @@ function writeMeshio(meshFileName::AbstractString,mesh::Mesh2D)
         return 0
     """
     py"pyWriteMeshIo"(meshFileName,mesh)
+    return 0
+end
+
+function writeSolution(solutionFileName::AbstractString,mesh::Mesh2D,pointOutput::Dict,cellOutput::Dict)
+    # Write solution to output file with meshio. VTU is the suggested output format. pointOutput and cellOutput can be empty dictionaries.
+    py"""
+    import numpy as np
+    import meshio
+    def pyWriteSolution(meshFileName,mesh,pointOutputDict,cellOutputDict):
+        nTriangles = np.size(mesh.triangles,0)
+        points = mesh.nodes
+        cells = [("triangle",mesh.triangles-1)]
+        m = meshio.Mesh(points,cells,point_data=pointOutputDict,cell_data=cellOutputDict)
+        m.write(meshFileName)
+        return 0
+    """
+    py"pyWriteSolution"(solutionFileName,mesh,pointOutput,cellOutput)
     return 0
 end
 

@@ -1,9 +1,9 @@
 module boring2D
 
-export Mesh2D, readMesh, writeMesh
+export Mesh2D, readMesh, writeMesh, writeSolution, solveConvection
 
 struct Mesh2D
-    " [nNodes,2 Float64] Node locations (x,y)."
+    "[nNodes,2 Float64] Node locations (x,y)."
     nodes::Matrix{Float64}
 
     "[nNodes,3 Int32] Edge nodes numbers and boundary ID number."
@@ -17,5 +17,7 @@ struct Mesh2D
 end
 
 include("meshIO.jl")
-
+include("triangleElements.jl")
+include("sparseTriplet.jl")
+include("solveConvection.jl")
 end
