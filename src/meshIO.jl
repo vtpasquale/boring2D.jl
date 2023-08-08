@@ -24,6 +24,8 @@ function readMeshFormat(meshFileName::AbstractString,format::AbstractString)
     # Read format
     if format=="su2"
         return readSU2(meshFileName::AbstractString)
+    elseif format=="plt"
+        return readPLT(meshFileName::AbstractString)
     else
         println("""Mesh format "$format" not supported for reading.""")
         return 1
@@ -45,6 +47,49 @@ function readSU2(meshFileName::AbstractString)
 
     return Mesh2D(nodes,edges,triangles)
 end
+
+
+function readPLT(filename::String)
+    # Construct from CBSFlow ascii file
+    fid = open(filename,"r");
+                
+    # Process header
+    getLine = readline(fid);
+    splitLine = split(strip(getLine));  
+    nTriangles = parse(Int32,splitLine[1]);
+    nNodes = parse(Int32,splitLine[2]);
+    nEdges = parse(Int32,splitLine[3]);
+
+    # Read triangles
+    tri = Array{Int32}(undef,nTriangles,3)
+    for i = 1:nTriangles
+        splitLine = split(strip(readline(fid)));
+        tri[i,1] = parse(Int32,splitLine[2]);
+        tri[i,2] = parse(Int32,splitLine[3]);
+        tri[i,3] = parse(Int32,splitLine[4]);
+    end
+    
+    # Read nodes
+    nodes = Array{Float64}(undef,nNodes,2)
+    for i = 1:nNodes
+        splitLine = split(strip(readline(fid)));
+        nodes[i,1] = parse(Float64,splitLine[2]);
+        nodes[i,2] = parse(Float64,splitLine[3]);
+    end
+
+    # Read edges
+    edges = Array{Int32}(undef,nEdges,3)
+    for i = 1:nEdges
+        splitLine = split(strip(readline(fid)));
+        edges[i,1] = parse(Int32,splitLine[1]);
+        edges[i,2] = parse(Int32,splitLine[2]);
+        edges[i,3] = parse(Int32,splitLine[4]);
+    end
+    
+    close(fid);
+    return Mesh2D(nodes,edges,tri)
+end
+
 
 # --------------- WRITE --------------------------
 
