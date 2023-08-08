@@ -23,22 +23,22 @@ function solveConvection(meshFileName::AbstractString,k::Float64,boundaryTemps::
     end
 
     # Partition and solve
-    Kff = K[f,f]
-    Kfs = K[f,s]
-    us = u[s]
-    rhs = -Kfs*us
+    # Kff = K[f,f]
+    # Kfs = K[f,s]
+    # us = u[s]
+    # rhs = -Kfs*us
     # uf = Kff\rhs
     # u[f] = uf
-    # # u[f] = K[f,f]\(-K[f,s]*u[s]);
+    u[f] = K[f,f]\(-K[f,s]*u[s])
 
-    # # Create solution dictionaries
-    # pointOutput = Dict("Temp"=>u)
-    # cellOutput = Dict()
+    # Create solution dictionaries
+    pointOutput = Dict("Temp"=>u)
+    cellOutput = Dict()
 
-    # # Write output data to file
-    # boring2D.writeSolution("out.vtu",mesh,pointOutput,cellOutput)
+    # Write output data to file
+    boring2D.writeSolution("out.vtu",mesh,pointOutput,cellOutput)
 
-    return (Kff,rhs)
+    return 0
 end
 
 function assembleConvectionStiffness(mesh::Mesh2D,triangleElements::Vector{TriangleElements},k::Float64)
