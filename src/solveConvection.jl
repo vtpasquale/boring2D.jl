@@ -48,17 +48,17 @@ function assembleConvectionStiffness(mesh::Mesh2D,triangleElements::Vector{Trian
     nNodes = size(mesh.nodes,1);
 
     # One Temperature DOF per node
-    nDof = nNodes;
+    nDof = Int64(nNodes);
 
     # # Global matrices (slow method)
     # K = spzeros(nDof,nDof);
 
     # Global matrices with triplets
-    Ks = SparseTriplet(nNodes);
+    Ks = SparseTriplet(nDof);
 
     # Assemble stiffness matrix
     for i = 1:nElements
-        dof = mesh.triangles[i,:]
+        dof = Vector{Int64}(mesh.triangles[i,:])
         dNdX = triangleElements[i].dNdX
         area = triangleElements[i].area
         k_e = transpose(dNdX)*k*dNdX*area

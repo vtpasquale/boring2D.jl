@@ -1,17 +1,17 @@
 using SparseArrays
 
 mutable struct SparseTriplet
-        paddedLength::Int32 # Length of the triplet vectors including padding
-        nTriplets::Int32 # Number of triplets
-        i::Vector{Int32} # [paddedLength, 1] row indices
-        j::Vector{Int32} # [paddedLength, 1] column indices
+        paddedLength::Int64 # Length of the triplet vectors including padding
+        nTriplets::Int64 # Number of triplets
+        i::Vector{Int64} # [paddedLength, 1] row indices
+        j::Vector{Int64} # [paddedLength, 1] column indices
         s::Vector{Float64} # [paddedLength, 1] matrix values
 end
 
-function SparseTriplet(paddedLengthIn::Integer)
-    nTriplets = Int32(0);
-    i = Vector{Int32}(undef,paddedLengthIn);
-    j = Vector{Int32}(undef,paddedLengthIn); 
+function SparseTriplet(paddedLengthIn::Int64)
+    nTriplets = Int64(0);
+    i = Vector{Int64}(undef,paddedLengthIn);
+    j = Vector{Int64}(undef,paddedLengthIn); 
     s = Vector{Float64}(undef,paddedLengthIn); 
     return SparseTriplet(paddedLengthIn,nTriplets,i,j,s);
 end
@@ -20,8 +20,8 @@ function padVectors!(sparseTriplet::SparseTriplet)
     # Doubles the size of triplet vectors by padding with zeros
     oldPaddedLength = sparseTriplet.paddedLength;
     newPaddedLength = 2*oldPaddedLength;
-    i = Vector{Int32}(undef,newPaddedLength);
-    j = Vector{Int32}(undef,newPaddedLength); 
+    i = Vector{Int64}(undef,newPaddedLength);
+    j = Vector{Int64}(undef,newPaddedLength); 
     s = Vector{Float64}(undef,newPaddedLength); 
 
     i[1:oldPaddedLength] = sparseTriplet.i;
@@ -35,7 +35,7 @@ function padVectors!(sparseTriplet::SparseTriplet)
     return 0
 end
 
-function addMatrix!(sparseTriplet::SparseTriplet,M::Matrix{Float64},gDof::Vector{Int32})
+function addMatrix!(sparseTriplet::SparseTriplet,M::Matrix{Float64},gDof::Vector{Int64})
     # Adds matrix M with global DOF gDof to SparseTriplet
     iM,jM,m=findnz(sparse(M));
     
@@ -56,7 +56,7 @@ function addMatrix!(sparseTriplet::SparseTriplet,M::Matrix{Float64},gDof::Vector
     return 0
 end
 
-function convertToSparseMatrix(sparseTriplet::SparseTriplet,n::Integer,m::Integer)
+function convertToSparseMatrix(sparseTriplet::SparseTriplet,n::Int64,m::Int64)
     # convert triplets to sparse matrix
     return sparse(  sparseTriplet.i[1:sparseTriplet.nTriplets], 
                     sparseTriplet.j[1:sparseTriplet.nTriplets],
