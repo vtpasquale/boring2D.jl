@@ -47,11 +47,12 @@ function TriangleElements(mesh::Mesh2D)
     return triangleElements;
 end
 
-# function [r,s,w3]=gaussPointsAndWeights()
+# function gaussPointsAndWeights()
 #     # 3-Point Gauss integration points & weight factor
 #     r = [2/3 1/6 1/6];
 #     s = [1/6 1/6 2/3];
 #     w3 = 1/3;
+#     return r, s, w3
 # end
 # function [N1,N2,N3]=vectorShapeFunValsAtIntPoints(r,s)
 #     # 2D vector shape function values at integration points
@@ -63,10 +64,11 @@ end
 #     N3 = [1-r(3)-s(3),           0, r(3),    0, s(3),   0   ;
 #         0, 1-r(3)-s(3),    0, r(3),    0, s(3) ];
 # end
-# function [N1,N2,N3]=scalarShapeFunValsAtIntPoints(r,s)
+# function scalarShapeFunValsAtIntPoints(r,s)
 #     # Scalar shape function values at integration points
 #     # shapeFunctions = @(r,s) [1-r-s, r, s];
-#     N1 = [1-r(1)-s(1), r(1), s(1)];
-#     N2 = [1-r(2)-s(2), r(2), s(2)];
-#     N3 = [1-r(3)-s(3), r(3), s(3)];
+#     N1 = [1-r[1]-s[1], r[1], s[1]];
+#     N2 = [1-r[2]-s[2], r[2], s[2]];
+#     N3 = [1-r[3]-s[3], r[3], s[3]];
+#     return N1, N2, N3
 # end

@@ -1,30 +1,35 @@
 
+# using Revise
 using boring2D
 
 cd("examples")
 
-meshFileName = "5000NUcav.plt";
+meshFileName = "n0012.plt";
+# meshFileName = "5000NUcav.plt";
 # meshFileName = "square.su2";
 
 k = 1.0 # Conductivity
-boundaryTemps = [100.0, 200.0, 300.0, 400.0]
+# boundaryTemps = [100.0, 200.0, 300.0, 400.0]
+boundaryTemps = [100.0, 200.0]
+
 
 # solve
-(Kff,rhs) =solveConvection(meshFileName,k,boundaryTemps)
+@time solveConvection(meshFileName,k,boundaryTemps)
 
+# mesh = readMesh("square.su2")
 
-using SparseArrays
-@time Kff\rhs; # 66 seconds - wth?
-@time Kff\ sparse(rhs); % 67 seconds
-@time Matrix(Kff)\rhs; # .2 seconds
+# using SparseArrays
+# @time Kff\rhs; # 66 seconds - wth?
+# @time Kff\ sparse(rhs); # 67 seconds
+# @time Matrix(Kff)\rhs; # .2 seconds
 
-
-
-# function profile_test(n,meshFileName,k,boundaryTemps)
-#     for i = 1:n
-#         solveConvection(meshFileName,k,boundaryTemps)
-#     end
-# end
+# To force Julia to use its own Python distribution, via Conda, 
+# simply set ENV["PYTHON"] to the empty string "" 
+# and re-run Pkg.build("PyCall").
+# using Pkg
+# using PyCall
+# ENV["PYTHON"]=""
+# Pkg.build("PyCall")
 
 # using ProfileView
 # ProfileView.@profview profile_test(1,meshFileName,k,boundaryTemps)  # run once to trigger compilation (ignore this one)

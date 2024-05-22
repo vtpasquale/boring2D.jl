@@ -1,6 +1,6 @@
 module boring2D
 
-export Mesh2D, readMesh, writeMesh, writeSolution, solveConvection
+export Mesh2D, readMesh, writeMesh, writeSolution, solveConvection, TriangleElements, assembleConvectionStiffness, solvePotentialFlow, solveStream
 
 struct Mesh2D
     "[nNodes,2 Float64] Node locations (x,y)."
@@ -20,4 +20,7 @@ include("meshIO.jl")
 include("triangleElements.jl")
 include("sparseTriplet.jl")
 include("solveConvection.jl")
+include("solvePotentialFlow.jl")
+include("solveStream.jl")
+
 end
