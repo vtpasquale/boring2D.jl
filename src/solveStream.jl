@@ -21,7 +21,8 @@ function solveStream(meshFileName::AbstractString,boundaryConditionType::Vector{
 
     f = trues(nDof) # free nodes
     phi = zeros(nDof,1)
-    
+    farfieldOnes = zeros(nDof,1) # Vector of ones at fairfield dof
+
     for i = 1:nBoundaries
         if boundaryConditionType[i] == 0
             # natural BC
@@ -37,7 +38,7 @@ function solveStream(meshFileName::AbstractString,boundaryConditionType::Vector{
                 xs = mesh.nodes[boundaryEdgeNodes,1]
                 ys = mesh.nodes[boundaryEdgeNodes,2]
                 phi[boundaryEdgeNodes] .= v0.*xs - u0.*ys
-    
+                farfieldOnes[boundaryEdgeNodes] .= 1.0
             else
                 error("Unknown boundary condition")
     
@@ -48,39 +49,20 @@ function solveStream(meshFileName::AbstractString,boundaryConditionType::Vector{
     # fixed dof
     s = .!f
     
-    # # ---------------------------
-    # # Farfield vortex (results in zero phi)
-    # ds = ( xs.^2 + ys.^2 ).^(.5)
-    # thetas = atan.(ys,xs)
-    # u1 =  (1.0 ./ds).*sin.(thetas)
-    # u2 = -(1.0 ./ds).*cos.(thetas)
-    
-    # using Plots
-    # plot(thetas,phi[s] )
-    # plot(xs,ys)
-    
-    # # ---------------------------
-    # # create source load vector
-    # w3 = 1.0/3.0
-    # p = zeros(nDof,1)
-    # for i = 1:nEle
-    #     weightedArea = w3*triangleElements[i].area
-    #     p[mesh.triangles[i,1]] += weightedArea
-    #     p[mesh.triangles[i,2]] += weightedArea
-    #     p[mesh.triangles[i,3]] += weightedArea
-    # end
+    # Farfield constant term
+    kfshat = K[f,s]*farfieldOnes[s]
 
-    # # create constraint equation 
-    # constEqu = spzeros(nDof)
-    # dof = mesh.triangles[zeroVyEle,:]
-    # coefficents = triangleElements[zeroVyEle].dNdX[2,:]
-    # constEqu[dof] = coefficents
+    # create constraint equation 
+    constEqu = spzeros(nDof)
+    dof = mesh.triangles[zeroVyEle,:]
+    coefficents = triangleElements[zeroVyEle].dNdX[1,:]
+    constEqu[dof] = coefficents
 
-    # # Solve equations with constraint and source strength
-    # A = [K[f,f] -p[f]; transpose(constEqu[f]) 0.0]
-    # b =  [- K[f,s]*phi[s]; 0.0] 
-    # x = A\b
-    # phi[f] = x[1:end-1]
+    # Solve equations unknown boundary constant + Kutta-condition constraint
+    A = [K[f,f] kfshat; transpose(constEqu[f]) 0.0]
+    b =  [- K[f,s]*phi[s]; 0.0] 
+    x = A\b
+    phi[f] = x[1:end-1]
 
     # ---------------------------
     # Partition and solve
@@ -90,7 +72,7 @@ function solveStream(meshFileName::AbstractString,boundaryConditionType::Vector{
     # rhs = -Kfs*us
     # uf = Kff\rhs
     # u[f] = uf
-    phi[f] = K[f,f]\(-K[f,s]*phi[s])
+    # phi[f] = K[f,f]\(-K[f,s]*phi[s])
 
     # ---------------------------
     # Recover velocities
@@ -106,7 +88,7 @@ function solveStream(meshFileName::AbstractString,boundaryConditionType::Vector{
     cellOutput = Dict("vX"=>[velX],"vY"=>[velY])
     
     # Write output data to file
-    # boring2D.writeSolution("potentialFlow.vtu",mesh,pointOutput,cellOutput)   
+    boring2D.writeSolution("streamSolution.vtu",mesh,pointOutput,cellOutput)   
 
-    return pointOutput,cellOutput
+    return 0
 end
