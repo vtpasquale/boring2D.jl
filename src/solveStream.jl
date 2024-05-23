@@ -127,15 +127,25 @@ function solveStream(meshFileName::AbstractString,boundaryConditionType::Vector{
             Cfx = sum( Cpe.*dl.*cos.(inNormalAngle) )
             Cfy = sum( Cpe.*dl.*sin.(inNormalAngle) )
 
-            CL = Cfx*sin(freestreamAlpha) + Cfy*cos(freestreamAlpha) 
-            CD = Cfx*cos(freestreamAlpha) + Cfy*sin(freestreamAlpha) 
+            CL = -Cfx*sin(freestreamAlpha) + Cfy*cos(freestreamAlpha) 
+            CD =  Cfx*cos(freestreamAlpha) + Cfy*sin(freestreamAlpha) 
 
             println("CL=$(CL)")
             println("CD=$(CD)")
 
-            # vXe = 0.5*(nodeVx[boundaryEdges,1].+nodeVx[boundaryEdges,2])
-            # vYe = 0.5*(nodeVy[boundaryEdges,1].+nodeVy[boundaryEdges,2])
-            # Vt = vXe.*cos.(theta) .+ vYe.*sin.(theta)
+            # println("Cfx*sin(freestreamAlpha)=$(Cfx*sin(freestreamAlpha))")
+            # println("Cfy*cos(freestreamAlpha)=$(Cfy*cos(freestreamAlpha))")
+            # println("Cfx*cos(freestreamAlpha)=$(Cfx*cos(freestreamAlpha))")
+            # println("Cfy*sin(freestreamAlpha)=$(Cfy*sin(freestreamAlpha))")
+
+            vXe = 0.5*(nodeVx[boundaryEdges[:,1]].+nodeVx[boundaryEdges[:,2]])
+            vYe = 0.5*(nodeVy[boundaryEdges[:,1]].+nodeVy[boundaryEdges[:,2]])
+            vTan = vXe.*cos.(theta) .+ vYe.*sin.(theta)
+            circulation = sum(vTan .*dl)
+            CLc = 2*circulation/freestreamV
+
+            println("CLc=$(CLc)")
+
             # Vn = vXe.*sin.(theta) .+ vYe.*cos.(theta)
             # dl= sqrt.(dx.^2+dy.^2)
             # ut = u.*cos(theta)+v.*sin(theta)
@@ -144,5 +154,5 @@ function solveStream(meshFileName::AbstractString,boundaryConditionType::Vector{
     end
 
 
-    return 0
+    return
 end

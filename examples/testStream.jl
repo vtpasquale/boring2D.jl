@@ -13,8 +13,8 @@ boundaryConditionType = [2;1] # [farfield;airfoil]
 # 1 - Essential BC with constant value
 # 2 - Essential freestream BC
 essentialPhi = [0.;0.]
-zeroVyEle = 219
+zeroVyEle = 223
 
 freestreamV = 100.
-freestreamAlpha = 8. *pi/180.
+freestreamAlpha = 1.0 *pi/180.
 solveStream(meshFileName,boundaryConditionType,freestreamV,freestreamAlpha,essentialPhi,zeroVyEle)
