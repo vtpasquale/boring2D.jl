@@ -16,5 +16,5 @@ essentialPhi = [0.;0.]
 zeroVyEle = 219
 
 freestreamV = 100.
-freestreamAlpha = 5. *pi/180.
+freestreamAlpha = 8. *pi/180.
 solveStream(meshFileName,boundaryConditionType,freestreamV,freestreamAlpha,essentialPhi,zeroVyEle)
