@@ -1,6 +1,6 @@
 module boring2D
 
-export Mesh2D, readMesh, writeMesh, writeSolution, solveConvection, TriangleElements, assembleConvectionStiffness, solvePotentialFlow, solveStream
+export solveConvection, solveStream, solveStreamLiftAdjoint
 
 struct Mesh2D
     "[nNodes,2 Float64] Node locations (x,y)."
@@ -11,16 +11,14 @@ struct Mesh2D
 
     "[nTriangles,3 Int32] Triangle element node numbers."
     triangles::Matrix{Int32}
-
-    # "Internal constructor"
-    # Gmf() = new()
+    
 end
 
 include("meshIO.jl")
 include("triangleElements.jl")
 include("sparseTriplet.jl")
 include("solveConvection.jl")
-include("solvePotentialFlow.jl")
 include("solveStream.jl")
+include("solveStreamLiftAdjoint.jl")
 
 end

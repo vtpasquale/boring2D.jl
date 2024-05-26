@@ -38,7 +38,7 @@ function solveStream(inputFileName::AbstractString)
     psi[f] = x[1:end-1]
 
     # compute lift coefficent from psi
-    psiToCirculationMap = computePsiToCirculationMap(inputData,mesh,triangleElements)
+    psiToCirculationMap = computePsiToCirculationMap(inputData["mesh"]["airfoilBoundaryID"],mesh,triangleElements)
     circulation = psiToCirculationMap*psi
     Cl = 2*circulation[1]/inputData["freestream"]["velocity"] # Kutta-Joukowski with chord=1
 
@@ -50,6 +50,107 @@ function solveStream(inputFileName::AbstractString)
     boring2D.writeSolution("streamSolution.vtu",mesh,pointOutput,cellOutput)
 
     return Cl
+end
+
+function streamBoundaryConditions(mesh::Mesh2D,inputData::Dict)    
+    Vinf = inputData["freestream"]["velocity"]
+    alphaDeg = inputData["freestream"]["alphaDeg"]
+    return streamBoundaryConditions(mesh,inputData,Vinf,alphaDeg)
+end
+function streamBoundaryConditions(mesh::Mesh2D,inputData::Dict,Vinf::Float64,alphaDeg::Float64)    
+    
+    # Velocities
+    # Vinf = inputData["freestream"]["velocity"] # Moved to input argument to enable sensitivities
+    # alphaDeg = inputData["freestream"]["alphaDeg"]
+    u0 = Vinf*cosd(alphaDeg)
+    v0 = Vinf*sind(alphaDeg)
+
+    # Preallocate arrays
+    nDof = size(mesh.nodes,1)
+    f = trues(nDof) # free nodes
+    psi = zeros(nDof,1)
+    esa = zeros(nDof,1) # Vector of ones at fairfield dof
+
+    # Boundary ID logic
+    meshBoundaryIDs = sort(unique(mesh.edges[:,3]))
+    nBoundaries = size(meshBoundaryIDs,1)
+    if nBoundaries != 2
+        error("This process is set up for one airfoil and one freestream boundary.")
+    end
+
+    # All boundary conditions are essential. Otherwise neeed additional logic | boundaryEdges = mesh.edges[mesh.edges[:,3].==boundaryIDs[i],1:2]
+    boundaryEdgeNodes = sort(unique(mesh.edges[:,1:2]))
+    f[boundaryEdgeNodes] .= false # free dof
+    s = .!f  # fixed dof
+
+    # Airfoil boundary
+    airfoilBoundaryID = inputData["mesh"]["airfoilBoundaryID"]
+    locb = indexin(airfoilBoundaryID,meshBoundaryIDs)
+    if isnothing(locb)
+        error("The airfoil boundary ID specified in the input file was not found in the mesh.")
+    end
+    # psi is preallocated to zero, which is the correct boundary value at the airfoil (c2=0)
+
+    # Farfield boundary
+    farfieldBoundaryID = inputData["mesh"]["farfieldBoundaryID"]
+    locb = indexin(farfieldBoundaryID,meshBoundaryIDs)
+    if isnothing(locb)
+        error("The farfield boundary ID specified in the input file was not found in the mesh.")
+    end
+    farfieldEdges = mesh.edges[mesh.edges[:,3].==farfieldBoundaryID,1:2]
+    farfieldEdgeNodes = sort(unique(farfieldEdges[:,1:2]))
+    xs = mesh.nodes[farfieldEdgeNodes,1]
+    ys = mesh.nodes[farfieldEdgeNodes,2]
+    psi[farfieldEdgeNodes] .= v0.*xs - u0.*ys
+    esa[farfieldEdgeNodes] .= 1.0
+
+    return f, s, psi, esa
+end
+
+function computePsiToCirculationMap(airfoilBoundaryID::Integer,mesh::Mesh2D,triangleElements::Vector{TriangleElements})
+    nDof = size(mesh.nodes,1)
+
+    # get airfoil edges
+    # airfoilBoundaryID = inputData["mesh"]["airfoilBoundaryID"]
+    airfoilEdges = mesh.edges[mesh.edges[:,3].==airfoilBoundaryID,1:2]
+
+    # compute edge lengths
+    xe = mesh.nodes[airfoilEdges,1]
+    ye = mesh.nodes[airfoilEdges,2]
+    dx = xe[:,2].-xe[:,1]
+    dy = ye[:,2].-ye[:,1]
+    dl = sqrt.(dx.^2+dy.^2)
+
+    # Compute angles
+    theta = atan.(dy,dx)
+
+    # find element adjacent to edge by finding matching nodes
+    nEdges = size(airfoilEdges,1)
+    elementID = zeros(Int32,nEdges,1)
+    for i = 1:nEdges
+        edge1 = mesh.triangles .== airfoilEdges[i,1]
+        edge2 = mesh.triangles .== airfoilEdges[i,2]
+        bothEdge = edge1 .+ edge2
+        sumBothEdge = sum(bothEdge,dims=2)
+        elementIndex = findfirst(sumBothEdge.==2)
+        elementID[i] = elementIndex[1]
+    end
+
+    # Matrix that maps psi to circulation
+    psiToCirculationMap = zeros(1,nDof)
+    for i = 1:nEdges
+        nodeDof = mesh.triangles[elementID[i],:]
+        
+        velYCoeff =     transpose(triangleElements[elementID[i]].dNdX[1,:]) # * psi[dof]
+        velXCoeff = -1* transpose(triangleElements[elementID[i]].dNdX[2,:]) # * psi[dof]
+
+        vTanCoeff = velXCoeff.*cos.(theta[i]) .+ velYCoeff.*sin.(theta[i])
+        circulationCoeff = dl[i].*vTanCoeff
+
+        psiToCirculationMap[1,nodeDof] = psiToCirculationMap[1,nodeDof] .+ transpose(circulationCoeff)
+    end
+
+    return psiToCirculationMap
 end
 
 # function postprocess()
@@ -133,100 +234,3 @@ end
 #     end
 #     return 0
 # end
-
-
-function streamBoundaryConditions(mesh::Mesh2D,inputData::Dict)    
-    
-    # Velocities
-    Vinf = inputData["freestream"]["velocity"]
-    alphaDeg = inputData["freestream"]["alphaDeg"]
-    u0 = Vinf*cosd(alphaDeg)
-    v0 = Vinf*sind(alphaDeg)
-
-    # Preallocate arrays
-    nDof = size(mesh.nodes,1)
-    f = trues(nDof) # free nodes
-    psi = zeros(nDof,1)
-    esa = zeros(nDof,1) # Vector of ones at fairfield dof
-
-    # Boundary ID logic
-    meshBoundaryIDs = sort(unique(mesh.edges[:,3]))
-    nBoundaries = size(meshBoundaryIDs,1)
-    if nBoundaries != 2
-        error("This process is set up for one airfoil and one freestream boundary.")
-    end
-
-    # All boundary conditions are essential. Otherwise neeed additional logic | boundaryEdges = mesh.edges[mesh.edges[:,3].==boundaryIDs[i],1:2]
-    boundaryEdgeNodes = sort(unique(mesh.edges[:,1:2]))
-    f[boundaryEdgeNodes] .= false # free dof
-    s = .!f  # fixed dof
-
-    # Airfoil boundary
-    airfoilBoundaryID = inputData["mesh"]["airfoilBoundaryID"]
-    locb = indexin(airfoilBoundaryID,meshBoundaryIDs)
-    if isnothing(locb)
-        error("The airfoil boundary ID specified in the input file was not found in the mesh.")
-    end
-    # psi is preallocated to zero, which is the correct boundary value at the airfoil (c2=0)
-
-    # Farfield boundary
-    farfieldBoundaryID = inputData["mesh"]["farfieldBoundaryID"]
-    locb = indexin(farfieldBoundaryID,meshBoundaryIDs)
-    if isnothing(locb)
-        error("The farfield boundary ID specified in the input file was not found in the mesh.")
-    end
-    farfieldEdges = mesh.edges[mesh.edges[:,3].==farfieldBoundaryID,1:2]
-    farfieldEdgeNodes = sort(unique(farfieldEdges[:,1:2]))
-    xs = mesh.nodes[farfieldEdgeNodes,1]
-    ys = mesh.nodes[farfieldEdgeNodes,2]
-    psi[farfieldEdgeNodes] .= v0.*xs - u0.*ys
-    esa[farfieldEdgeNodes] .= 1.0
-
-    return f, s, psi, esa
-end
-
-function computePsiToCirculationMap(inputData::Dict,mesh::Mesh2D,triangleElements::Vector{TriangleElements})
-    nDof = size(mesh.nodes,1)
-
-    # get airfoil edges
-    airfoilBoundaryID = inputData["mesh"]["airfoilBoundaryID"]
-    airfoilEdges = mesh.edges[mesh.edges[:,3].==airfoilBoundaryID,1:2]
-
-    # compute edge lengths
-    xe = mesh.nodes[airfoilEdges,1]
-    ye = mesh.nodes[airfoilEdges,2]
-    dx = xe[:,2].-xe[:,1]
-    dy = ye[:,2].-ye[:,1]
-    dl = sqrt.(dx.^2+dy.^2)
-
-    # Compute angles
-    theta = atan.(dy,dx)
-
-    # find element adjacent to edge by finding matching nodes
-    nEdges = size(airfoilEdges,1)
-    elementID = zeros(Int32,nEdges,1)
-    for i = 1:nEdges
-        edge1 = mesh.triangles .== airfoilEdges[i,1]
-        edge2 = mesh.triangles .== airfoilEdges[i,2]
-        bothEdge = edge1 .+ edge2
-        sumBothEdge = sum(bothEdge,dims=2)
-        elementIndex = findfirst(sumBothEdge.==2)
-        elementID[i] = elementIndex[1]
-    end
-
-    # Matrix that maps psi to circulation
-    psiToCirculationMap = zeros(1,nDof)
-    for i = 1:nEdges
-        nodeDof = mesh.triangles[elementID[i],:]
-        
-        velYCoeff =     transpose(triangleElements[elementID[i]].dNdX[1,:]) # * psi[dof]
-        velXCoeff = -1* transpose(triangleElements[elementID[i]].dNdX[2,:]) # * psi[dof]
-
-        vTanCoeff = velXCoeff.*cos.(theta[i]) .+ velYCoeff.*sin.(theta[i])
-        circulationCoeff = dl[i].*vTanCoeff
-
-        psiToCirculationMap[1,nodeDof] = psiToCirculationMap[1,nodeDof] .+ transpose(circulationCoeff)
-    end
-
-    return psiToCirculationMap
-end
