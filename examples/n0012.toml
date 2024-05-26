@@ -1,0 +1,11 @@
+
+
+[mesh]
+fileName = "n0012.plt"
+airfoilBoundaryID = 2
+farfieldBoundaryID = 1
+kuttaConditionElementID = 223
+
+[freestream]
+velocity = 100.0
+alphaDeg = 1.0
