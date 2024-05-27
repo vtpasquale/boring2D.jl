@@ -1,10 +1,48 @@
 using SparseArrays
 using TOML
 
+struct SteamFunctionLinearSystem
+    "[nFreePsi+1,nFreePsi+1] Coefficent matrix."
+    A::SparseMatrixCSC{Float64}
+
+    "[nFreePsi+1,1] Right-hand side."
+    b::Vector{Float64}
+
+    "[nPsi] Free psi dof."
+    f::BitVector
+    
+    Kfs::SparseMatrixCSC{Float64}
+
+end
+
+function getFxfromF(sfls::SteamFunctionLinearSystem)
+    nDof = size(sfls.f,1)
+    fx = falses(nDof+1)
+    fx[1:end-1] .= sfls.f
+    fx[end] = true
+    return fx
+end
+
+struct FarfieldEdgeData
+    "[nFarfieldEdgeNodes] Node ID numbers."
+    farfieldEdgeNodes::Vector{Int32}
+
+    "[nFarfieldEdgeNodes] x position of farfield edge nodes."
+    xs::Vector{Float64}
+
+    "[nFarfieldEdgeNodes] y position of farfield edge nodes."
+    ys::Vector{Float64}
+
+    "Freestream velocity"
+    Vinf::Float64
+end
+
 function solveStream(inputFileName::AbstractString)
 
-    # ,boundaryConditionType::Vector{Int64},freestreamV::Float64,freestreamAlpha::Float64,essentialpsi::Vector{Float64},zeroVyEle::Int64
-
+    # inputFileName = "n0012.toml"
+    # using SparseArrays
+    # using TOML
+    
     # Read input file
     inputData = TOML.parsefile(inputFileName)
 
@@ -12,15 +50,54 @@ function solveStream(inputFileName::AbstractString)
     TOML.print(inputData)
 
     # Process mesh
-    mesh = readMesh(inputData["mesh"]["fileName"])
+    mesh = boring2D.readMesh(inputData["mesh"]["fileName"])
     nDof = size(mesh.nodes,1)
     # nEle = size(mesh.triangles,1)
-    triangleElements = TriangleElements(mesh)
+    triangleElements = boring2D.TriangleElements(mesh)
 
+    # Assemble and solve linear system
+    sfls, psi, farfieldEdgeData = boring2D.assembleStreamFunctionLinearSystem(mesh,inputData,triangleElements)
+    A = sfls.A
+    b = sfls.b
+    f = sfls.f
+    x = A\b
+    psi[f] = x[1:end-1]
+
+    # Recover lift coefficent
+    fx = boring2D.getFxfromF(sfls)
+    xToCl = boring2D.compute_xToCl(mesh,inputData,triangleElements,fx)
+    Cl = xToCl*x
+
+    # Lift coefficent adjoint solution
+    λ = transpose(A)\transpose(xToCl)
+    lamdaOut = zeros(nDof+1,1)
+    lamdaOut[fx] = λ
+
+    # Lift derivative with respect to α
+    ∂b∂α = boring2D.compute_∂b∂α(inputData,sfls,farfieldEdgeData)
+    ∂Cl∂α = transpose(λ)*∂b∂α
+
+    # Create solution dictionaries
+    pointOutput = Dict("psi"=>psi,"lambda"=>lamdaOut[1:end-1])
+    cellOutput = Dict()
+
+    # Write output data to file
+    boring2D.writeSolution("streamSolution.vtu",mesh,pointOutput,cellOutput)
+
+    return Cl, ∂Cl∂α
+end
+
+function assembleStreamFunctionLinearSystem(mesh::Mesh2D,inputData::Dict,triangleElements::Vector{TriangleElements})
     # Assemble domain and boundary matricies
     K = assembleConvectionStiffness(mesh,triangleElements,1.0)
-    f, s, psi, esa = streamBoundaryConditions(mesh::Mesh2D,inputData)
+    f, s, psi, esa, farfieldEdgeData = streamBoundaryConditions(mesh,inputData)
     
+    # free set in x vector
+    nDof = size(mesh.nodes,1)
+    fx = falses(nDof+1)
+    fx[1:end-1] .= f
+    fx[end] = true
+
     # Farfield constant term
     keas = K[f,s]*esa[s]
 
@@ -34,34 +111,36 @@ function solveStream(inputFileName::AbstractString)
     # Solve equations with unknown boundary constant + Kutta-condition constraint
     A = [K[f,f] keas; transpose(g[f]) 0.0]
     b =  [-K[f,s]*psi[s]; 0.0] 
-    x = A\b
-    psi[f] = x[1:end-1]
 
-    # compute lift coefficent from psi
-    psiToCirculationMap = computePsiToCirculationMap(inputData["mesh"]["airfoilBoundaryID"],mesh,triangleElements)
-    circulation = psiToCirculationMap*psi
-    Cl = 2*circulation[1]/inputData["freestream"]["velocity"] # Kutta-Joukowski with chord=1
+    Kfs = K[f,s]
+    sfls = SteamFunctionLinearSystem(A,b,f,Kfs)    
 
-    # Create solution dictionaries
-    pointOutput = Dict("psi"=>psi)
-    cellOutput = Dict()
-    
-    # Write output data to file
-    boring2D.writeSolution("streamSolution.vtu",mesh,pointOutput,cellOutput)
-
-    return Cl
+    return sfls, psi, farfieldEdgeData
 end
 
-function streamBoundaryConditions(mesh::Mesh2D,inputData::Dict)    
-    Vinf = inputData["freestream"]["velocity"]
+function compute_∂b∂α(inputData::Dict,sfls::SteamFunctionLinearSystem,farfieldEdgeData::FarfieldEdgeData)
+    
+    Kfs = sfls.Kfs
+    f = sfls.f
+    s = .!f
+    nDof = size(f,1)
+    dpsi = zeros(nDof,1)
+    
+    Vinf = inputData["freestream"]["velocity"] # Moved to input argument to enable sensitivities
     alphaDeg = inputData["freestream"]["alphaDeg"]
-    return streamBoundaryConditions(mesh,inputData,Vinf,alphaDeg)
+    du0 = -Vinf*sind(alphaDeg) # This is the derivative wrt alpha in radians, not degres
+    dv0 =  Vinf*cosd(alphaDeg)
+    dpsi[farfieldEdgeData.farfieldEdgeNodes] .= dv0.*farfieldEdgeData.xs - du0.*farfieldEdgeData.ys
+
+    ∂b∂α = [-Kfs*dpsi[s]; 0.0] 
+
+    return ∂b∂α
 end
-function streamBoundaryConditions(mesh::Mesh2D,inputData::Dict,Vinf::Float64,alphaDeg::Float64)    
-    
+
+function streamBoundaryConditions(mesh::Mesh2D,inputData::Dict)       
     # Velocities
-    # Vinf = inputData["freestream"]["velocity"] # Moved to input argument to enable sensitivities
-    # alphaDeg = inputData["freestream"]["alphaDeg"]
+    Vinf = inputData["freestream"]["velocity"] # Moved to input argument to enable sensitivities
+    alphaDeg = inputData["freestream"]["alphaDeg"]
     u0 = Vinf*cosd(alphaDeg)
     v0 = Vinf*sind(alphaDeg)
 
@@ -104,14 +183,15 @@ function streamBoundaryConditions(mesh::Mesh2D,inputData::Dict,Vinf::Float64,alp
     psi[farfieldEdgeNodes] .= v0.*xs - u0.*ys
     esa[farfieldEdgeNodes] .= 1.0
 
-    return f, s, psi, esa
+    farfieldEdgeData = FarfieldEdgeData(farfieldEdgeNodes,xs,ys,Vinf)
+    return f, s, psi, esa, farfieldEdgeData
 end
 
-function computePsiToCirculationMap(airfoilBoundaryID::Integer,mesh::Mesh2D,triangleElements::Vector{TriangleElements})
+function compute_xToCl(mesh::Mesh2D,inputData::Dict,triangleElements::Vector{TriangleElements},fx::BitVector)
     nDof = size(mesh.nodes,1)
 
     # get airfoil edges
-    # airfoilBoundaryID = inputData["mesh"]["airfoilBoundaryID"]
+    airfoilBoundaryID = inputData["mesh"]["airfoilBoundaryID"]
     airfoilEdges = mesh.edges[mesh.edges[:,3].==airfoilBoundaryID,1:2]
 
     # compute edge lengths
@@ -136,8 +216,8 @@ function computePsiToCirculationMap(airfoilBoundaryID::Integer,mesh::Mesh2D,tria
         elementID[i] = elementIndex[1]
     end
 
-    # Matrix that maps psi to circulation
-    psiToCirculationMap = zeros(1,nDof)
+    # Matrix that maps x=[psi;0] to circulation
+    xToCirculationMap = zeros(1,nDof+1)
     for i = 1:nEdges
         nodeDof = mesh.triangles[elementID[i],:]
         
@@ -147,10 +227,14 @@ function computePsiToCirculationMap(airfoilBoundaryID::Integer,mesh::Mesh2D,tria
         vTanCoeff = velXCoeff.*cos.(theta[i]) .+ velYCoeff.*sin.(theta[i])
         circulationCoeff = dl[i].*vTanCoeff
 
-        psiToCirculationMap[1,nodeDof] = psiToCirculationMap[1,nodeDof] .+ transpose(circulationCoeff)
+        xToCirculationMap[1,nodeDof] = xToCirculationMap[1,nodeDof] .+ transpose(circulationCoeff)
     end
 
-    return psiToCirculationMap
+    # Kutta-Joukowski with chord=1
+    xToCl = (2/inputData["freestream"]["velocity"])* 
+            transpose(xToCirculationMap[fx])  # indexing converts array to ID so transpose required
+
+    return xToCl
 end
 
 # function postprocess()
