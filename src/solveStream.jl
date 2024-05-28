@@ -52,7 +52,7 @@ function solveStream(inputFileName::AbstractString)
     # Process mesh
     mesh = boring2D.readMesh(inputData["mesh"]["fileName"])
     nDof = size(mesh.nodes,1)
-    # nEle = size(mesh.triangles,1)
+    nEle = size(mesh.triangles,1)
     triangleElements = boring2D.TriangleElements(mesh)
 
     # Assemble and solve linear system
@@ -77,9 +77,42 @@ function solveStream(inputFileName::AbstractString)
     ∂b∂α = boring2D.compute_∂b∂α(inputData,sfls,farfieldEdgeData)
     ∂Cl∂α = transpose(λ)*∂b∂α
 
+     # ---------------------------
+     # Approximate nodal velocities
+     nAdjacentElements = zeros(Int8,nDof,1)
+     sumAdjacentVx = zeros(nDof,1)
+     sumAdjacentVy = zeros(nDof,1)
+     sumAdjacentdVx = zeros(nDof,1)
+     sumAdjacentdVy = zeros(nDof,1)
+    # ---------------------------
+    # Recover element velocities and adjoint velocities
+    velX = zeros(nEle,1)
+    velY = zeros(nEle,1)
+    dVelX = zeros(nEle,1)
+    dVelY = zeros(nEle,1)
+    for i = 1:nEle
+        dof = mesh.triangles[i,:]
+        velY[i] =     transpose(triangleElements[i].dNdX[1,:]) * psi[dof]
+        velX[i] = -1* transpose(triangleElements[i].dNdX[2,:]) * psi[dof]
+        dVelX[i] =     transpose(triangleElements[i].dNdX[1,:]) * lamdaOut[dof]
+        dVelY[i] = -1* transpose(triangleElements[i].dNdX[2,:]) * lamdaOut[dof]
+
+        nAdjacentElements[dof] .+= 1
+        sumAdjacentVy[dof] .+= velY[i]
+        sumAdjacentVx[dof] .+= velX[i]
+        sumAdjacentdVy[dof] .+= dVelX[i]
+        sumAdjacentdVx[dof] .+= dVelY[i]
+    end
+    nodeVy = sumAdjacentVy ./ nAdjacentElements
+    nodeVx = sumAdjacentVx ./ nAdjacentElements
+    nodeDVy = sumAdjacentdVy ./ nAdjacentElements
+    nodeDVx = sumAdjacentdVx ./ nAdjacentElements
+    nodeVmag = sqrt.(nodeVx.^2 + nodeVy.^2)
+    Cp = 1.0 .- (nodeVmag ./ inputData["freestream"]["velocity"]).^2
+
     # Create solution dictionaries
-    pointOutput = Dict("psi"=>psi,"lambda"=>lamdaOut[1:end-1])
-    cellOutput = Dict()
+    pointOutput = Dict("psi"=>psi,"lambda"=>lamdaOut[1:end-1],"vX"=>nodeVx,"vY"=>nodeVy,"vMag"=>nodeVmag,"Cp"=>Cp,"nodeDVy"=>nodeDVy,"nodeDVx"=>nodeDVx)
+    cellOutput = Dict("vX"=>[velX],"vY"=>[velY],"dVelX"=>[dVelX],"dVelY"=>[dVelY])
 
     # Write output data to file
     boring2D.writeSolution("streamSolution.vtu",mesh,pointOutput,cellOutput)
