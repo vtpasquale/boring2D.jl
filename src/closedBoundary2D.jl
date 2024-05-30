@@ -172,4 +172,18 @@ function computeGxγ(mesh::Mesh2D,triangleElements::Vector{TriangleElements},bou
     return gxγ
 end
 
-
+function computeCfFromCp(Cp::Vector{Float64},mesh::Mesh2D,boundary::ClosedBoundary2D,inputData::Dict)
+    adjacentElement = boring2D.getAdjacentElementIDs(mesh,boundary)
+    Cx = -sum( boundary.edgeNormal[1,:].* boundary.edgeLength .* Cp[adjacentElement])
+    Cy = -sum( boundary.edgeNormal[2,:].* boundary.edgeLength .* Cp[adjacentElement])
+    Cd =  cosd(inputData["freestream"]["alphaDeg"])*Cx - sind(inputData["freestream"]["alphaDeg"])*Cy
+    Cl =  sind(inputData["freestream"]["alphaDeg"])*Cx + cosd(inputData["freestream"]["alphaDeg"])*Cy
+    println("")
+    println("Force coefficients from integrated pressure coefficient")
+    println("Cl = $Cl")
+    println("Cd = $Cd")
+    println("Cx = $Cx")
+    println("Cy = $Cy")
+    return 0
+end
+# end
