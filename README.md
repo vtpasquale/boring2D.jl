@@ -2,6 +2,10 @@
 
 [![Build Status](https://github.com/vtpasquale/boring2D.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/vtpasquale/boring2D.jl/actions/workflows/CI.yml?query=branch%3Amain)
 
+## Setup Julia
+Consider setting environment variable `JULIA_DEPOT_PATH` to control where the julia package files are stored. It may make sense to keep them off the default drive or default folder (e.g., `JULIA_DEPOT_PATH=S:\aricciar\julia\depo`).
+
+If Julia is installed using an administrator account, the user paths my not be added correctly. Make sure the Julia binary folder is added to the user path environment variable.
 
 
 ## Setup Julia packages and Python

@@ -1,48 +1,19 @@
 using SparseArrays
 using TOML
 
-struct SteamFunctionLinearSystem
-    "[nFreePsi+1,nFreePsi+1] Coefficent matrix."
-    A::SparseMatrixCSC{Float64}
-
-    "[nFreePsi+1,1] Right-hand side."
-    b::Vector{Float64}
-
-    "[nPsi] Free psi dof."
-    f::BitVector
-    
-    Kfs::SparseMatrixCSC{Float64}
-
-end
-
-function getFxfromF(sfls::SteamFunctionLinearSystem)
-    nDof = size(sfls.f,1)
+function getFxfromF(f::BitVector)
+    nDof = size(f,1)
     fx = falses(nDof+1)
-    fx[1:end-1] .= sfls.f
+    fx[1:end-1] .= f
     fx[end] = true
     return fx
 end
 
-struct FarfieldEdgeData
-    "[nFarfieldEdgeNodes] Node ID numbers."
-    farfieldEdgeNodes::Vector{Int32}
-
-    "[nFarfieldEdgeNodes] x position of farfield edge nodes."
-    xs::Vector{Float64}
-
-    "[nFarfieldEdgeNodes] y position of farfield edge nodes."
-    ys::Vector{Float64}
-
-    "Freestream velocity"
-    Vinf::Float64
-end
-
 function solveStream(inputFileName::AbstractString)
-
     # inputFileName = "n0012.toml"
     # using SparseArrays
     # using TOML
-    
+
     # Read input file
     inputData = TOML.parsefile(inputFileName)
 
@@ -54,70 +25,186 @@ function solveStream(inputFileName::AbstractString)
     nDof = size(mesh.nodes,1)
     nEle = size(mesh.triangles,1)
     triangleElements = boring2D.TriangleElements(mesh)
+    airfoilBoundary, farfieldBoundary, f, s = boring2D.processMeshBoundaries(mesh,inputData)
+    gxγ = boring2D.computeGxγ(mesh,triangleElements,airfoilBoundary,f)
 
-    # Assemble and solve linear system
-    sfls, psi, farfieldEdgeData = boring2D.assembleStreamFunctionLinearSystem(mesh,inputData,triangleElements)
-    A = sfls.A
-    b = sfls.b
-    f = sfls.f
-    x = A\b
-    psi[f] = x[1:end-1]
+    # Assemble coefficent matrix
+    K = boring2D.assembleConvectionStiffness(mesh,triangleElements,1.0)
+    g = boring2D.assembleKuttaConditionConstraint(mesh,inputData,triangleElements)
+    esa = boring2D.assembleEsa(nDof,farfieldBoundary)
+    A = boring2D.assembleA(K,g,esa,f,s)
 
-    # Recover lift coefficent
-    fx = boring2D.getFxfromF(sfls)
-    xToCl = boring2D.compute_xToCl(mesh,inputData,triangleElements,fx)
-    Cl = xToCl*x
+    # Assemble right-hand side
+    ψsk = boring2D.assembleψsk(nDof,farfieldBoundary,inputData)
+    b = boring2D.assembleB(K,ψsk,f,s)
 
-    # Lift coefficent adjoint solution
-    λ = transpose(A)\transpose(xToCl)
+    # Solve linear system
+    x = A\Array(b)
+
+    # Recover responses
+    ψ = boring2D.recoverψ(x,ψsk,esa,f,s)
+    Cl = (2/inputData["freestream"]["velocity"])* gxγ*x
+
+    # Adjoint solution
+    ∂Cl∂x = (2/inputData["freestream"]["velocity"])* gxγ
+    λ = transpose(A)\transpose(∂Cl∂x)
+
+    fx = boring2D.getFxfromF(f)
     lamdaOut = zeros(nDof+1,1)
     lamdaOut[fx] = λ
 
-    # Lift derivative with respect to α
-    ∂b∂α = boring2D.compute_∂b∂α(inputData,sfls,farfieldEdgeData)
-    ∂Cl∂α = transpose(λ)*∂b∂α
 
-     # ---------------------------
-     # Approximate nodal velocities
-     nAdjacentElements = zeros(Int8,nDof,1)
-     sumAdjacentVx = zeros(nDof,1)
-     sumAdjacentVy = zeros(nDof,1)
-     sumAdjacentdVx = zeros(nDof,1)
-     sumAdjacentdVy = zeros(nDof,1)
-    # ---------------------------
-    # Recover element velocities and adjoint velocities
-    velX = zeros(nEle,1)
-    velY = zeros(nEle,1)
-    dVelX = zeros(nEle,1)
-    dVelY = zeros(nEle,1)
-    for i = 1:nEle
-        dof = mesh.triangles[i,:]
-        velY[i] =     transpose(triangleElements[i].dNdX[1,:]) * psi[dof]
-        velX[i] = -1* transpose(triangleElements[i].dNdX[2,:]) * psi[dof]
-        dVelX[i] =     transpose(triangleElements[i].dNdX[1,:]) * lamdaOut[dof]
-        dVelY[i] = -1* transpose(triangleElements[i].dNdX[2,:]) * lamdaOut[dof]
-
-        nAdjacentElements[dof] .+= 1
-        sumAdjacentVy[dof] .+= velY[i]
-        sumAdjacentVx[dof] .+= velX[i]
-        sumAdjacentdVy[dof] .+= dVelX[i]
-        sumAdjacentdVx[dof] .+= dVelY[i]
-    end
-    nodeVy = sumAdjacentVy ./ nAdjacentElements
-    nodeVx = sumAdjacentVx ./ nAdjacentElements
-    nodeDVy = sumAdjacentdVy ./ nAdjacentElements
-    nodeDVx = sumAdjacentdVx ./ nAdjacentElements
-    nodeVmag = sqrt.(nodeVx.^2 + nodeVy.^2)
-    Cp = 1.0 .- (nodeVmag ./ inputData["freestream"]["velocity"]).^2
-
-    # Create solution dictionaries
-    pointOutput = Dict("psi"=>psi,"lambda"=>lamdaOut[1:end-1],"vX"=>nodeVx,"vY"=>nodeVy,"vMag"=>nodeVmag,"Cp"=>Cp,"nodeDVy"=>nodeDVy,"nodeDVx"=>nodeDVx)
-    cellOutput = Dict("vX"=>[velX],"vY"=>[velY],"dVelX"=>[dVelX],"dVelY"=>[dVelY])
+    pointOutput = Dict("psi"=>ψ,"lamda"=>lamdaOut[1:end-1])
+    cellOutput = Dict()
 
     # Write output data to file
     boring2D.writeSolution("streamSolution.vtu",mesh,pointOutput,cellOutput)
 
-    return Cl, ∂Cl∂α
+
+    # # Lift derivative with respect to α
+    # ∂b∂α = boring2D.compute_∂b∂α(inputData,sfls,farfieldEdgeData)
+    # ∂Cl∂α = transpose(λ)*∂b∂α
+
+    #  # ---------------------------
+    #  # Approximate nodal velocities
+    #  nAdjacentElements = zeros(Int8,nDof,1)
+    #  sumAdjacentVx = zeros(nDof,1)
+    #  sumAdjacentVy = zeros(nDof,1)
+    #  sumAdjacentdVx = zeros(nDof,1)
+    #  sumAdjacentdVy = zeros(nDof,1)
+    # # ---------------------------
+    # # Recover element velocities and adjoint velocities
+    # velX = zeros(nEle,1)
+    # velY = zeros(nEle,1)
+    # dVelX = zeros(nEle,1)
+    # dVelY = zeros(nEle,1)
+    # for i = 1:nEle
+    #     dof = mesh.triangles[i,:]
+    #     velY[i] =     transpose(triangleElements[i].dNdX[1,:]) * psi[dof]
+    #     velX[i] = -1* transpose(triangleElements[i].dNdX[2,:]) * psi[dof]
+    #     dVelX[i] =    transpose(triangleElements[i].dNdX[1,:]) * lamdaOut[dof]
+    #     dVelY[i] = -1*transpose(triangleElements[i].dNdX[2,:]) * lamdaOut[dof]
+
+    #     nAdjacentElements[dof] .+= 1
+    #     sumAdjacentVy[dof] .+= velY[i]
+    #     sumAdjacentVx[dof] .+= velX[i]
+    #     sumAdjacentdVy[dof] .+= dVelX[i]
+    #     sumAdjacentdVx[dof] .+= dVelY[i]
+    # end
+    # nodeVy = sumAdjacentVy ./ nAdjacentElements
+    # nodeVx = sumAdjacentVx ./ nAdjacentElements
+    # nodeDVy = sumAdjacentdVy ./ nAdjacentElements
+    # nodeDVx = sumAdjacentdVx ./ nAdjacentElements
+    # nodeVmag = sqrt.(nodeVx.^2 + nodeVy.^2)
+    # Cp = 1.0 .- (nodeVmag ./ inputData["freestream"]["velocity"]).^2
+
+    # # Create solution dictionaries
+    # pointOutput = Dict("psi"=>psi,"lambda"=>lamdaOut[1:end-1],"vX"=>nodeVx,"vY"=>nodeVy,"vMag"=>nodeVmag,"Cp"=>Cp,"nodeDVy"=>nodeDVy,"nodeDVx"=>nodeDVx)
+    # cellOutput = Dict("vX"=>[velX],"vY"=>[velY],"dVelX"=>[dVelX],"dVelY"=>[dVelY])
+
+    # # Write output data to file
+    # boring2D.writeSolution("streamSolution.vtu",mesh,pointOutput,cellOutput)
+
+    return Cl # , ∂Cl∂α
+end
+
+function assembleKuttaConditionConstraint(mesh::Mesh2D,inputData::Dict,triangleElements::Vector{TriangleElements})
+    nDof = size(mesh.nodes,1)
+    zeroVyEle = inputData["mesh"]["kuttaConditionElementID"]
+    g = spzeros(nDof)
+    dof = mesh.triangles[zeroVyEle,:]
+    coefficents = triangleElements[zeroVyEle].dNdX[1,:]
+    g[dof] = coefficents
+    return g
+end
+
+function assembleEsa(nDof::Int64,farfieldBoundary::ClosedBoundary2D)
+    esa = spzeros(nDof) # Vector of ones at fairfield dof
+    esa[farfieldBoundary.nodeIDs] .= 1.0
+    return esa
+end
+
+function assembleA(K::SparseMatrixCSC{Float64},g::SparseVector{Float64},esa::SparseVector{Float64},f::BitVector,s::BitVector)
+    keas = K[f,s]*esa[s]
+    A = [K[f,f] keas; transpose(g[f]) 0.0]
+    return A
+end
+
+function assembleψsk(nDof::Int64,farfieldBoundary::ClosedBoundary2D,inputData::Dict)     
+    Vinf = inputData["freestream"]["velocity"] # Moved to input argument to enable sensitivities
+    alphaDeg = inputData["freestream"]["alphaDeg"]
+    u0 = Vinf*cosd(alphaDeg)
+    v0 = Vinf*sind(alphaDeg)
+    ψsk = spzeros(nDof) 
+    xs = farfieldBoundary.nodeLocation[:,1]
+    ys = farfieldBoundary.nodeLocation[:,2]
+    ψsk[farfieldBoundary.nodeIDs] .= v0.*xs - u0.*ys
+    return ψsk
+end
+
+function assembleB(K::SparseMatrixCSC{Float64},ψsk::SparseVector{Float64},f::BitVector,s::BitVector)
+    b =  [-K[f,s]*ψsk[s]; 0.0] 
+    return b
+end
+
+function recoverψ(x::Vector{Float64},ψsk::SparseVector{Float64},esa::SparseVector{Float64},f::BitVector,s::BitVector)
+    nDof = size(f,1)
+    ψ = Array{Float64}(undef, nDof)
+    ψ[f] = x[1:end-1]
+    c3 = x[end]
+    ψ[s] = ψsk[s] .+ c3*esa[s]
+    return ψ
+end
+
+
+function compute_gxγ(mesh::Mesh2D,triangleElements::Vector{TriangleElements},airfoilBoundary::ClosedBoundary2D)
+    nDof = size(mesh.nodes,1)
+
+    # get airfoil edges
+    airfoilBoundaryID = inputData["mesh"]["airfoilBoundaryID"]
+    airfoilEdges = mesh.edges[mesh.edges[:,3].==airfoilBoundaryID,1:2]
+
+    # compute edge lengths
+    xe = mesh.nodes[airfoilEdges,1]
+    ye = mesh.nodes[airfoilEdges,2]
+    dx = xe[:,2].-xe[:,1]
+    dy = ye[:,2].-ye[:,1]
+    dl = sqrt.(dx.^2+dy.^2)
+
+    # Compute angles
+    theta = atan.(dy,dx)
+
+    # find element adjacent to edge by finding matching nodes
+    nEdges = size(airfoilEdges,1)
+    elementID = zeros(Int32,nEdges,1)
+    for i = 1:nEdges
+        edge1 = mesh.triangles .== airfoilEdges[i,1]
+        edge2 = mesh.triangles .== airfoilEdges[i,2]
+        bothEdge = edge1 .+ edge2
+        sumBothEdge = sum(bothEdge,dims=2)
+        elementIndex = findfirst(sumBothEdge.==2)
+        elementID[i] = elementIndex[1]
+    end
+
+    # Matrix that maps x=[psi;0] to circulation
+    xToCirculationMap = zeros(1,nDof+1)
+    for i = 1:nEdges
+        nodeDof = mesh.triangles[elementID[i],:]
+        
+        velYCoeff =     transpose(triangleElements[elementID[i]].dNdX[1,:]) # * psi[dof]
+        velXCoeff = -1* transpose(triangleElements[elementID[i]].dNdX[2,:]) # * psi[dof]
+
+        vTanCoeff = velXCoeff.*cos.(theta[i]) .+ velYCoeff.*sin.(theta[i])
+        circulationCoeff = dl[i].*vTanCoeff
+
+        xToCirculationMap[1,nodeDof] = xToCirculationMap[1,nodeDof] .+ transpose(circulationCoeff)
+    end
+
+    # Kutta-Joukowski with chord=1
+    xToCl = (2/inputData["freestream"]["velocity"])* 
+            transpose(xToCirculationMap[fx])  # indexing converts array to ID so transpose required
+
+    return xToCl
 end
 
 function assembleStreamFunctionLinearSystem(mesh::Mesh2D,inputData::Dict,triangleElements::Vector{TriangleElements})
@@ -170,7 +257,12 @@ function compute_∂b∂α(inputData::Dict,sfls::SteamFunctionLinearSystem,farfi
     return ∂b∂α
 end
 
-function streamBoundaryConditions(mesh::Mesh2D,inputData::Dict)       
+function streamBoundaryConditions(mesh::Mesh2D,inputData::Dict)     
+    
+    
+
+
+
     # Velocities
     Vinf = inputData["freestream"]["velocity"] # Moved to input argument to enable sensitivities
     alphaDeg = inputData["freestream"]["alphaDeg"]
@@ -251,6 +343,48 @@ function compute_xToCl(mesh::Mesh2D,inputData::Dict,triangleElements::Vector{Tri
 
     # Matrix that maps x=[psi;0] to circulation
     xToCirculationMap = zeros(1,nDof+1)
+    for i = 1:nEdges
+        nodeDof = mesh.triangles[elementID[i],:]
+        
+        velYCoeff =     transpose(triangleElements[elementID[i]].dNdX[1,:]) # * psi[dof]
+        velXCoeff = -1* transpose(triangleElements[elementID[i]].dNdX[2,:]) # * psi[dof]
+
+        vTanCoeff = velXCoeff.*cos.(theta[i]) .+ velYCoeff.*sin.(theta[i])
+        circulationCoeff = dl[i].*vTanCoeff
+
+        xToCirculationMap[1,nodeDof] = xToCirculationMap[1,nodeDof] .+ transpose(circulationCoeff)
+    end
+
+    # Kutta-Joukowski with chord=1
+    xToCl = (2/inputData["freestream"]["velocity"])* 
+            transpose(xToCirculationMap[fx])  # indexing converts array to ID so transpose required
+
+    return xToCl
+end
+
+function computeAirfoilEdgeData(mesh::Mesh2D,inputData::Dict)
+    nDof = size(mesh.nodes,1)
+
+    # get airfoil edges
+    airfoilBoundaryID = inputData["mesh"]["airfoilBoundaryID"]
+    airfoilEdges = mesh.edges[mesh.edges[:,3].==airfoilBoundaryID,1:2]
+
+    # compute edge lengths
+    xe = mesh.nodes[airfoilEdges,1]
+    ye = mesh.nodes[airfoilEdges,2]
+    dx = xe[:,2].-xe[:,1]
+    dy = ye[:,2].-ye[:,1]
+    dl = sqrt.(dx.^2+dy.^2)
+
+    # Compute angles
+    theta = atan.(dy,dx)
+
+    # find element adjacent to edge by finding matching nodes
+    
+
+    # compute normal and tangent vectors at nodes
+    nEdges = size(airfoilEdges,1)
+    n = zeros(nDof+1nEdges)
     for i = 1:nEdges
         nodeDof = mesh.triangles[elementID[i],:]
         

@@ -1,7 +1,19 @@
 using PyCall
 
-# --------------- READ --------------------------
 
+struct Mesh2D
+    "[nNodes,2 Float64] Node locations (x,y)."
+    nodes::Matrix{Float64}
+
+    "[nNodes,3 Int32] Edge nodes numbers and boundary ID number."
+    edges::Matrix{Int32}
+
+    "[nTriangles,3 Int32] Triangle element node numbers."
+    triangles::Matrix{Int32}
+    
+end
+
+# --------------- READ --------------------------
 
 # Read mesh with format infered from file extension (most of the time)
 function readMesh(meshFileName::AbstractString)
