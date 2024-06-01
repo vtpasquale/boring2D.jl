@@ -50,8 +50,13 @@ function solveStream(inputFileName::AbstractString)
 
     # Sensitivity wrt α
     ∂ψsk_∂α = boring2D.assemble_∂ψsk_∂α(nDof,farfieldBoundary,inputData)
-    ∂b_∂α = boring2D.assemble_∂b_∂α(K,∂ψsk_∂α,f,s)
-    ∂Cl_∂α = transpose(λ)*∂b_∂α # per radian | ∂Cl_∂α_deg = ∂Cl_∂α*pi/180
+    ∂r_∂α = boring2D.assemble_∂r_∂α(K,∂ψsk_∂α,f,s)
+    ∂Cl_∂α = transpose(λ)*∂r_∂α # per radian | ∂Cl_∂α_deg = ∂Cl_∂α*pi/180
+    
+    # Shape sensitivities
+    ∂r_∂b = boring2D.assemble_∂r_∂b(mesh,x,inputData,size(airfoilBoundary.nodeIDs,1))
+    ∂Cl_∂b = transpose(λ)*∂r_∂b
+    boring2D.surfaceOutput2Vtk("surfaceSensitivity.vtk",airfoilBoundary,∂Cl_∂b[:]./airfoilBoundary.nodeLength)
 
     # Element Output
     velX, velY = recoverVelocities(ψ,mesh,triangleElements)
@@ -74,6 +79,95 @@ function solveStream(inputFileName::AbstractString)
     boring2D.writeSolution("streamSolution.vtu",mesh,pointOutput,cellOutput)
 
     return Cl, ∂Cl_∂α
+end
+
+function computeDeformedResidual(shapeVar::Vector,mesh0::Mesh2D,x::Vector{Float64},inputData::Dict)
+    # This function is intended for shape sensitivity analysis only. 
+
+    # Process mesh
+    # mesh = boring2D.readMesh(inputData["mesh"]["fileName"])
+    mesh = deepcopy(mesh0)
+    nDof = size(mesh.nodes,1)
+    airfoilBoundary, farfieldBoundary, f, s = boring2D.processMeshBoundaries(mesh,inputData)
+
+    # Deform mesh normals based on design variables
+    if size(shapeVar,1) != size(airfoilBoundary.nodeIDs,1)
+        error("Check design variable definition. size(shapeVar,1) != size(airfoilBoundary.nodeIDs,1)")
+    end
+    mesh.nodes[airfoilBoundary.nodeIDs,1] += shapeVar.*airfoilBoundary.nodeNormal[1,:]
+    mesh.nodes[airfoilBoundary.nodeIDs,2] += shapeVar.*airfoilBoundary.nodeNormal[2,:]
+
+    # Process elements
+    triangleElements = boring2D.TriangleElements(mesh)
+
+    # Assemble coefficent matrix
+    K = boring2D.assembleConvectionStiffness(mesh,triangleElements,1.0)
+    g = boring2D.assembleKuttaConditionConstraint(mesh,inputData,triangleElements)
+    esa = boring2D.assembleEsa(nDof,farfieldBoundary)
+    A = boring2D.assembleA(K,g,esa,f,s)
+
+    # Assemble right-hand side
+    ψsk = boring2D.assembleψsk(nDof,farfieldBoundary,inputData)
+    b = boring2D.assembleB(K,ψsk,f,s)
+
+    r = A*x-b
+
+    return r
+end
+
+function assemble_∂r_∂b(mesh::Mesh2D,x::Vector{Float64},inputData::Dict,nVars::Int64)
+    # Assemble residucal derivatives w.r.t. shape design varaiables
+
+    # Create unary residual function (i.e., function of design variables only)
+    unaryR(shapeVar::Vector) = boring2D.computeDeformedResidual(shapeVar,mesh,x,inputData)
+
+    # Check residual for zero-value design variables
+    # nVars = size(airfoilBoundary.nodeIDs,1)
+    shapeVar = zeros(nVars)
+    r = unaryR(shapeVar)
+    if maximum(abs.(r)) > 1e-10
+        error("The residual is higher than expected. There could be a design varaible or processing issue.")
+    end
+
+    # Compute ∂r_∂b using finite difference - automatic differntiation has unresolved issues
+    nR = size(r,1)
+    ∂r_∂b = zeros(nR,nVars)
+    Δ = 1e-6
+    for i = 1:nVars
+        shapeVar = zeros(nVars)
+        shapeVar[i] = Δ
+        ∂r_∂b[:,i] = unaryR(shapeVar) ./ Δ
+    end
+    return ∂r_∂b
+end
+
+function computeRotatedResidual(δα::Real,mesh::Mesh2D,x::Vector{Float64},inputData0::Dict)
+    # This function is for checking the analytic α sensitivy only
+
+    inputData = deepcopy(inputData0)
+    inputData["freestream"]["alphaDeg"] += 180.0/pi*δα
+
+    # Process mesh
+    # mesh = boring2D.readMesh(inputData["mesh"]["fileName"])
+    nDof = size(mesh.nodes,1)
+    airfoilBoundary, farfieldBoundary, f, s = boring2D.processMeshBoundaries(mesh,inputData)
+
+    # Process elements
+    triangleElements = boring2D.TriangleElements(mesh)
+
+    # Assemble coefficent matrix
+    K = boring2D.assembleConvectionStiffness(mesh,triangleElements,1.0)
+    g = boring2D.assembleKuttaConditionConstraint(mesh,inputData,triangleElements)
+    esa = boring2D.assembleEsa(nDof,farfieldBoundary)
+    A = boring2D.assembleA(K,g,esa,f,s)
+
+    # Assemble right-hand side
+    ψsk = boring2D.assembleψsk(nDof,farfieldBoundary,inputData) 
+    b = boring2D.assembleB(K,ψsk,f,s)
+
+    r = Array( A*x-b )
+
+    return r
 end
 
 function assembleKuttaConditionConstraint(mesh::Mesh2D,inputData::Dict,triangleElements::Vector{TriangleElements})
@@ -127,9 +221,9 @@ function assembleB(K::SparseMatrixCSC{Float64},ψsk::SparseVector{Float64},f::Bi
     return b
 end
 
-function assemble_∂b_∂α(K::SparseMatrixCSC{Float64},∂ψsk_∂α::SparseVector{Float64},f::BitVector,s::BitVector)
-    ∂b_∂α =  [-K[f,s]*∂ψsk_∂α[s]; 0.0] 
-    return ∂b_∂α
+function assemble_∂r_∂α(K::SparseMatrixCSC{Float64},∂ψsk_∂α::SparseVector{Float64},f::BitVector,s::BitVector)
+    ∂r_∂α =  [-K[f,s]*∂ψsk_∂α[s]; 0.0] 
+    return ∂r_∂α
 end
 
 function recoverψ(x::Vector{Float64},ψsk::SparseVector{Float64},esa::SparseVector{Float64},f::BitVector,s::BitVector)

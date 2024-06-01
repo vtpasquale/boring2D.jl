@@ -11,7 +11,7 @@ struct ClosedBoundary2D
     edgeNormal::Matrix{Float64}
 
     "[nNodes] node ID numbers along boundary"
-    nodeIDs::Vector{Int32}
+    nodeIDs::Vector{Int64}
 
     "[nNodes] Edge length attributed to each node"
     nodeLength::Vector{Float64}
@@ -25,7 +25,10 @@ struct ClosedBoundary2D
     "[nNodes,2] Position vector at each node."
     nodeLocation::Matrix{Float64}
 
-    "Boundary ID number in mesh fil."
+    "[nEdges] ID number of element adjacent to edge."
+    adjacentElementID::Vector{Int64}
+
+    "Boundary ID number in mesh file."
     ID::Int64
 end
 
@@ -119,39 +122,42 @@ function processClosedBoundary2D(mesh::Mesh2D,boundaryID::Int64)
 
     nodeLocation = mesh.nodes[nodeIDs,:]
 
+    # Elements adjacent to edges
+    adjacentElementID = getAdjacentElementIDs(mesh,boundaryID)
+
     # Checks
     if abs( sum(edgeLength) - sum(nodeLength)) > 1e-12
         error("Summed edge length and node lengths should be equal across the boundary.")
     end
 
     # output data in structure
-    return ClosedBoundary2D(edgeLength,edgeTangent,edgeNormal,nodeIDs,nodeLength,nodeTangent,nodeNormal,nodeLocation,boundaryID)
+    return ClosedBoundary2D(edgeLength,edgeTangent,edgeNormal,nodeIDs,nodeLength,nodeTangent,nodeNormal,nodeLocation,adjacentElementID,boundaryID)
 end
 
-function getAdjacentElementIDs(mesh::Mesh2D,boundary::ClosedBoundary2D)
+function getAdjacentElementIDs(mesh::Mesh2D,boundaryID::Int64)
 
     # find element adjacent to edge by finding matching nodes
-    boundaryNodes = mesh.edges[mesh.edges[:,3].==boundary.ID,1:2]
+    boundaryNodes = mesh.edges[mesh.edges[:,3].==boundaryID,1:2]
 
-    nEdges = size(boundary.edgeLength,1)
-    elementID = zeros(Int32,nEdges,1)
+    nEdges = size(boundaryNodes,1)
+    adjacentElementID = zeros(Int32,nEdges)
     for i = 1:nEdges
         edge1 = mesh.triangles .== boundaryNodes[i,1]
         edge2 = mesh.triangles .== boundaryNodes[i,2]
         bothEdge = edge1 .+ edge2
         sumBothEdge = sum(bothEdge,dims=2)
         elementIndex = findfirst(sumBothEdge.==2)
-        elementID[i] = elementIndex[1]
+        adjacentElementID[i] = elementIndex[1]
     end
 
-    return elementID
+    return adjacentElementID
 end
 
 function computeGxγ(mesh::Mesh2D,triangleElements::Vector{TriangleElements},boundary::ClosedBoundary2D,f::BitVector)
     nDof = size(mesh.nodes,1)
     nEdges = size(boundary.edgeLength,1)
     
-    adjacentElement = boring2D.getAdjacentElementIDs(mesh,boundary)
+    adjacentElement = boundary.adjacentElementID
     
     gψγ = zeros(nDof)
     for i = 1:nEdges
@@ -173,7 +179,7 @@ function computeGxγ(mesh::Mesh2D,triangleElements::Vector{TriangleElements},bou
 end
 
 function computeCfFromCp(Cp::Vector{Float64},mesh::Mesh2D,boundary::ClosedBoundary2D,inputData::Dict)
-    adjacentElement = boring2D.getAdjacentElementIDs(mesh,boundary)
+    adjacentElement = boundary.adjacentElementID
     Cx = -sum( boundary.edgeNormal[1,:].* boundary.edgeLength .* Cp[adjacentElement])
     Cy = -sum( boundary.edgeNormal[2,:].* boundary.edgeLength .* Cp[adjacentElement])
     Cd =  cosd(inputData["freestream"]["alphaDeg"])*Cx - sind(inputData["freestream"]["alphaDeg"])*Cy
@@ -186,4 +192,42 @@ function computeCfFromCp(Cp::Vector{Float64},mesh::Mesh2D,boundary::ClosedBounda
     println("Cy = $Cy")
     return 0
 end
-# end
+
+function surfaceOutput2Vtk(outputFileName::AbstractString,boundary::ClosedBoundary2D,outputData::Vector{Float64})
+    
+    nNodes = size(boundary.nodeIDs,1)
+    if size(outputData,1) != nNodes
+        error("size(outputData,1) != nNodes")
+    end
+
+    open(outputFileName,"w") do io
+        println(io,"# vtk DataFile Version 3.0")
+        println(io,"Surface Sensitivity")
+        println(io,"ASCII")
+        println(io,"")
+
+        println(io,"DATASET UNSTRUCTURED_GRID")
+        println(io,"POINTS $nNodes float")
+        for i = 1:nNodes
+            println(io,"$(boundary.nodeLocation[i,1]) $(boundary.nodeLocation[i,2]) 0.0")
+        end
+
+        println(io,"CELLS $nNodes $(3*nNodes)")
+        for i = 1:nNodes-1
+            println(io,"2 $(i-1) $i")
+        end
+        println(io,"2 $(nNodes-1) 0")
+
+        println(io,"CELL_TYPES $nNodes")
+        for i = 1:nNodes
+            println(io,"3")
+        end
+
+        println(io,"POINT_DATA $nNodes")
+        println(io,"SCALARS SurfaceSensitivity float")
+        println(io,"LOOKUP_TABLE default")
+        for i = 1:nNodes
+            println(io,"$(outputData[i])")
+        end
+    end
+end
