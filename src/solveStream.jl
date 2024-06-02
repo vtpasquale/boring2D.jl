@@ -54,9 +54,12 @@ function solveStream(inputFileName::AbstractString)
     ∂Cl_∂α = transpose(λ)*∂r_∂α # per radian | ∂Cl_∂α_deg = ∂Cl_∂α*pi/180
     
     # Shape sensitivities
-    ∂r_∂b = boring2D.assemble_∂r_∂b(mesh,x,inputData,size(airfoilBoundary.nodeIDs,1))
-    ∂Cl_∂b = transpose(λ)*∂r_∂b
-    boring2D.surfaceOutput2Vtk("surfaceSensitivity.vtk",airfoilBoundary,∂Cl_∂b[:]./airfoilBoundary.nodeLength)
+    ∂g_∂b, ∂r_∂b = boring2D.computeShapePartials(mesh,x,inputData,size(airfoilBoundary.nodeIDs,1))
+
+    # This sign    v     matches finite difference result. The math needs to be resolved
+    ∂Cl_∂b = ∂g_∂b - transpose(λ)*∂r_∂b
+
+    boring2D.surfaceOutput2Vtk("adjointSurfaceSensitivity.vtk",airfoilBoundary,∂Cl_∂b[:]./airfoilBoundary.nodeLength)
 
     # Element Output
     velX, velY = recoverVelocities(ψ,mesh,triangleElements)
@@ -81,24 +84,29 @@ function solveStream(inputFileName::AbstractString)
     return Cl, ∂Cl_∂α
 end
 
-function computeDeformedResidual(shapeVar::Vector,mesh0::Mesh2D,x::Vector{Float64},inputData::Dict)
+function computeCirculationMatrixAndResidual(shapeVar::Vector,mesh0::Mesh2D,x::Vector{Float64},inputData::Dict)
     # This function is intended for shape sensitivity analysis only. 
 
-    # Process mesh
     # mesh = boring2D.readMesh(inputData["mesh"]["fileName"])
     mesh = deepcopy(mesh0)
     nDof = size(mesh.nodes,1)
-    airfoilBoundary, farfieldBoundary, f, s = boring2D.processMeshBoundaries(mesh,inputData)
+
+    # Placeholder boundary data for design update
+    airfoilBoundary1, farfieldBoundary1, f1, s1 = boring2D.processMeshBoundaries(mesh,inputData)
 
     # Deform mesh normals based on design variables
-    if size(shapeVar,1) != size(airfoilBoundary.nodeIDs,1)
+    if size(shapeVar,1) != size(airfoilBoundary1.nodeIDs,1)
         error("Check design variable definition. size(shapeVar,1) != size(airfoilBoundary.nodeIDs,1)")
     end
-    mesh.nodes[airfoilBoundary.nodeIDs,1] += shapeVar.*airfoilBoundary.nodeNormal[1,:]
-    mesh.nodes[airfoilBoundary.nodeIDs,2] += shapeVar.*airfoilBoundary.nodeNormal[2,:]
+    mesh.nodes[airfoilBoundary1.nodeIDs,1] += shapeVar.*airfoilBoundary1.nodeNormal[1,:]
+    mesh.nodes[airfoilBoundary1.nodeIDs,2] += shapeVar.*airfoilBoundary1.nodeNormal[2,:]
 
-    # Process elements
+    # Process mesh
+    nDof = size(mesh.nodes,1)
+    nEle = size(mesh.triangles,1)
     triangleElements = boring2D.TriangleElements(mesh)
+    airfoilBoundary, farfieldBoundary, f, s = boring2D.processMeshBoundaries(mesh,inputData)
+    gxγ = boring2D.computeGxγ(mesh,triangleElements,airfoilBoundary,f)
 
     # Assemble coefficent matrix
     K = boring2D.assembleConvectionStiffness(mesh,triangleElements,1.0)
@@ -110,35 +118,42 @@ function computeDeformedResidual(shapeVar::Vector,mesh0::Mesh2D,x::Vector{Float6
     ψsk = boring2D.assembleψsk(nDof,farfieldBoundary,inputData)
     b = boring2D.assembleB(K,ψsk,f,s)
 
+    # Residual
     r = A*x-b
 
-    return r
+    return gxγ, r
 end
 
-function assemble_∂r_∂b(mesh::Mesh2D,x::Vector{Float64},inputData::Dict,nVars::Int64)
-    # Assemble residucal derivatives w.r.t. shape design varaiables
-
-    # Create unary residual function (i.e., function of design variables only)
-    unaryR(shapeVar::Vector) = boring2D.computeDeformedResidual(shapeVar,mesh,x,inputData)
+function computeShapePartials(mesh0::Mesh2D,x::Vector{Float64},inputData::Dict,nVars::Int64)
+    # Assemble partial derivatives w.r.t. shape design varaiables using finite difference
 
     # Check residual for zero-value design variables
     # nVars = size(airfoilBoundary.nodeIDs,1)
     shapeVar = zeros(nVars)
-    r = unaryR(shapeVar)
-    if maximum(abs.(r)) > 1e-10
+    gxγ0, r0 = computeCirculationMatrixAndResidual(shapeVar,mesh0,x,inputData)
+    if maximum(abs.(r0)) > 1e-10
         error("The residual is higher than expected. There could be a design varaible or processing issue.")
     end
 
-    # Compute ∂r_∂b using finite difference - automatic differntiation has unresolved issues
-    nR = size(r,1)
+    # Compute partials using finite difference - automatic differntiation has unresolved issues
+    nR = size(r0,1)
     ∂r_∂b = zeros(nR,nVars)
+    ∂g_∂b = zeros(1, nVars)
+
     Δ = 1e-6
     for i = 1:nVars
         shapeVar = zeros(nVars)
         shapeVar[i] = Δ
-        ∂r_∂b[:,i] = unaryR(shapeVar) ./ Δ
+        gxγ, r = boring2D.computeCirculationMatrixAndResidual(shapeVar,mesh0,x,inputData)
+        
+        ∂gxγ_∂b = (gxγ.-gxγ0) ./ Δ
+        ∂g_∂bi = (2/inputData["freestream"]["velocity"]) * ( ∂gxγ_∂b*x )
+        ∂g_∂b[i] = ∂g_∂bi[1] 
+
+        ∂r_∂b[:,i] = (r.-r0) ./ Δ
     end
-    return ∂r_∂b
+
+    return ∂g_∂b, ∂r_∂b
 end
 
 function computeRotatedResidual(δα::Real,mesh::Mesh2D,x::Vector{Float64},inputData0::Dict)
