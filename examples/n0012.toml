@@ -9,3 +9,8 @@ kuttaConditionElementID = 223
 [freestream]
 velocity = 100.0
 alphaDeg = 1.0
+
+[output]
+tomlFile = "n0012_output.toml"
+surfaceFile = "n0012_surface.vtk"
+volumeFile = "n0012_volume.vtu"

@@ -66,8 +66,8 @@ airfoilBoundary, farfieldBoundary, f, s = boring2D.processMeshBoundaries(mesh,in
 
 # Check residual for zero-value design variables
 nVars = size(airfoilBoundary.nodeIDs,1)
-shapeVar = zeros(nVars)
-Cl0, x0, A0 = computeClForFiniteDifference(shapeVar,mesh,inputData)
+shapeVar0 = zeros(nVars)
+Cl0, x0, A0 = computeClForFiniteDifference(shapeVar0,mesh,inputData)
 
 # Compute ∂Cl_∂b using finite difference - automatic differntiation has unresolved issues
 ∂Cl_∂b = zeros(nVars)
@@ -83,4 +83,4 @@ for i = 1:nVars
     ∂r_∂b[:,i] = A0*∂x_∂b
 end
 
-boring2D.surfaceOutput2Vtk("FiniteDiffSurfaceSensitivity.vtk",airfoilBoundary,∂Cl_∂b[:]./airfoilBoundary.nodeLength)
+boring2D.surfaceOutput2Vtk("surfaceSensitivityFiniteDiff.vtk",airfoilBoundary,∂Cl_∂b[:]./airfoilBoundary.nodeLength)
