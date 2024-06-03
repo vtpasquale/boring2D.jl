@@ -184,13 +184,8 @@ function computeCfFromCp(Cp::Vector{Float64},mesh::Mesh2D,boundary::ClosedBounda
     Cy = -sum( boundary.edgeNormal[2,:].* boundary.edgeLength .* Cp[adjacentElement])
     Cd =  cosd(inputData["freestream"]["alphaDeg"])*Cx - sind(inputData["freestream"]["alphaDeg"])*Cy
     Cl =  sind(inputData["freestream"]["alphaDeg"])*Cx + cosd(inputData["freestream"]["alphaDeg"])*Cy
-    println("")
-    println("Force coefficients from integrated pressure coefficient")
-    println("Cl = $Cl")
-    println("Cd = $Cd")
-    println("Cx = $Cx")
-    println("Cy = $Cy")
-    return 0
+    IntegratedPressure = Dict("Cl" => Cl, "Cd" => Cd, "Cx" => Cx, "Cy" => Cy)
+    return IntegratedPressure
 end
 
 function surfaceOutput2Vtk(outputFileName::AbstractString,boundary::ClosedBoundary2D,outputData::Vector{Float64})

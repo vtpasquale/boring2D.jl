@@ -2,16 +2,16 @@ using SparseArrays
 using TOML
 
 function solveStream(inputFileName::AbstractString)
-    # inputFileName = "n0012.toml"
+    # inputFileName = "n0012_input.toml"
     # using SparseArrays
     # using TOML
-
+    
     # Read input file
     inputData = TOML.parsefile(inputFileName)
-
+    
     # Echo input file
     TOML.print(inputData)
-
+    
     # Process mesh
     mesh = boring2D.readMesh(inputData["mesh"]["fileName"])
     nDof = size(mesh.nodes,1)
@@ -19,69 +19,71 @@ function solveStream(inputFileName::AbstractString)
     triangleElements = boring2D.TriangleElements(mesh)
     airfoilBoundary, farfieldBoundary, f, s = boring2D.processMeshBoundaries(mesh,inputData)
     gxγ = boring2D.computeGxγ(mesh,triangleElements,airfoilBoundary,f)
-
-    # Assemble coefficent matrix
+    
+    # Assemble coefficient matrix
     K = boring2D.assembleConvectionStiffness(mesh,triangleElements,1.0)
     g = boring2D.assembleKuttaConditionConstraint(mesh,inputData,triangleElements)
     esa = boring2D.assembleEsa(nDof,farfieldBoundary)
     A = boring2D.assembleA(K,g,esa,f,s)
-
+    
     # Assemble right-hand side
     ψsk = boring2D.assembleψsk(nDof,farfieldBoundary,inputData)
     b = boring2D.assembleB(K,ψsk,f,s)
-
+    
     # Stream function solution
     x = A\Array(b)
-
+    
     # Stream contour output
     ψ = boring2D.recoverψ(x,ψsk,esa,f,s)
-
-    # Lift coefficent
+    
+    # Lift coefficient
     Cl = (2/inputData["freestream"]["velocity"])* gxγ*x
-
+    KuttaJoukowskiTextOut = Dict("Cl" => Cl)
+    
     # Adjoint solution
     ∂Cl∂x = (2/inputData["freestream"]["velocity"])* gxγ
     λ = transpose(A)\transpose(∂Cl∂x)
-
+    
     # Adjoint contour output
     fx = boring2D.getFxfromF(f)
     lamdaOut = zeros(nDof+1)
     lamdaOut[fx] = λ
-
+    
     # Sensitivity wrt α
     ∂ψsk_∂α = boring2D.assemble_∂ψsk_∂α(nDof,farfieldBoundary,inputData)
     ∂r_∂α = boring2D.assemble_∂r_∂α(K,∂ψsk_∂α,f,s)
     ∂Cl_∂α = transpose(λ)*∂r_∂α # per radian | ∂Cl_∂α_deg = ∂Cl_∂α*pi/180
+    AdjointTextOut = Dict("∂Cl_∂α_rad" => ∂Cl_∂α,"∂Cl_∂α_deg" => ∂Cl_∂α*pi/180)
     
     # Shape sensitivities
     ∂g_∂b, ∂r_∂b = boring2D.computeShapePartials(mesh,x,inputData,size(airfoilBoundary.nodeIDs,1))
-
-    # This sign    v     matches finite difference result. The math needs to be resolved
     ∂Cl_∂b = ∂g_∂b - transpose(λ)*∂r_∂b
-
-    boring2D.surfaceOutput2Vtk("adjointSurfaceSensitivity.vtk",airfoilBoundary,∂Cl_∂b[:]./airfoilBoundary.nodeLength)
-
-    # Element Output
-    velX, velY = recoverVelocities(ψ,mesh,triangleElements)
-    dVelX, dVelY = recoverVelocities(lamdaOut,mesh,triangleElements)
+    
+    # Length-normalized shape sensitivities to surface output file
+    boring2D.surfaceOutput2Vtk(inputData["output"]["surfaceFile"],airfoilBoundary,∂Cl_∂b[:]./airfoilBoundary.nodeLength)
+    
+    # Recover element output
+    velX, velY = boring2D.recoverVelocities(ψ,mesh,triangleElements)
+    dVelX, dVelY = boring2D.recoverVelocities(lamdaOut,mesh,triangleElements)
     velMag = sqrt.(velX.^2 + velY.^2)
     Cp = 1.0 .- (velMag ./ inputData["freestream"]["velocity"]).^2
-
-    # Print Kutta–Joukowski Cl results
-    println("Lift coefficient from Kutta-Joukowski")
-    println("Cl = $Cl")
-
-    # Print force coefficients from integrated pressure coefficient
-    boring2D.computeCfFromCp(Cp,mesh,airfoilBoundary,inputData)
-
-    # Output dictionaries for output file
+    
+    # Integrate pressure coefficients
+    IntegratedPressureTextOut = boring2D.computeCfFromCp(Cp,mesh,airfoilBoundary,inputData)
+    
+    # Text output dictionary and output file
+    textOutput =  Dict("KuttaJoukowski" => KuttaJoukowskiTextOut,"IntegratedPressure" => IntegratedPressureTextOut, "Adjoint" => AdjointTextOut)
+    TOML.print(textOutput)
+    open(inputData["output"]["tomlFile"], "w") do io
+        TOML.print(io, textOutput)
+    end
+    
+    # Volume output dictionaries and output file
     pointOutput = Dict("psi"=>ψ,"lamda"=>lamdaOut[1:end-1])
     cellOutput = Dict("vX"=>[velX],"vY"=>[velY],"dVelX"=>[dVelX],"dVelY"=>[dVelY],"velMag"=>[velMag],"Cp"=>[Cp])
+    boring2D.writeSolution(inputData["output"]["volumeFile"],mesh,pointOutput,cellOutput)
 
-    # Write output data to file
-    boring2D.writeSolution("streamSolution.vtu",mesh,pointOutput,cellOutput)
-
-    return Cl, ∂Cl_∂α
+    return 0
 end
 
 function computeCirculationMatrixAndResidual(shapeVar::Vector,mesh0::Mesh2D,x::Vector{Float64},inputData::Dict)
