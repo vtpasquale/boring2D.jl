@@ -1,0 +1,16 @@
+
+
+[mesh]
+fileName = "m03.su2"
+airfoilBoundaryID = 1
+farfieldBoundaryID = 2
+kuttaConditionElementID = 8562
+
+[freestream]
+velocity = 100.0
+alphaDeg = 1.0
+
+[output]
+tomlFile = "m03_output.toml"
+surfaceFile = "m03_surface.vtk"
+volumeFile = "m03_volume.vtu"

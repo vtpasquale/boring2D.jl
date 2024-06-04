@@ -126,7 +126,7 @@ function processClosedBoundary2D(mesh::Mesh2D,boundaryID::Int64)
     adjacentElementID = getAdjacentElementIDs(mesh,boundaryID)
 
     # Checks
-    if abs( sum(edgeLength) - sum(nodeLength)) > 1e-12
+    if abs( sum(edgeLength) - sum(nodeLength))/sum(nodeLength) > 1e-12
         error("Summed edge length and node lengths should be equal across the boundary.")
     end
 
@@ -197,7 +197,7 @@ function surfaceOutput2Vtk(outputFileName::AbstractString,boundary::ClosedBounda
 
     open(outputFileName,"w") do io
         println(io,"# vtk DataFile Version 3.0")
-        println(io,"Surface Sensitivity")
+        println(io,"Surface Result")
         println(io,"ASCII")
         println(io,"")
 
@@ -219,7 +219,7 @@ function surfaceOutput2Vtk(outputFileName::AbstractString,boundary::ClosedBounda
         end
 
         println(io,"POINT_DATA $nNodes")
-        println(io,"SCALARS SurfaceSensitivity float")
+        println(io,"SCALARS SurfaceResult float")
         println(io,"LOOKUP_TABLE default")
         for i = 1:nNodes
             println(io,"$(outputData[i])")

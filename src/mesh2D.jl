@@ -45,19 +45,103 @@ function readMeshFormat(meshFileName::AbstractString,format::AbstractString)
     
 end
 
+function getNextSu2Line(fid)
+    getLine = readline(fid)
+    splitLine = split(strip(getLine))
+    if startswith(splitLine[1],"%")
+        nextLine = getNextSu2Line(fid)
+    else
+        return splitLine
+    end
+end
+
 function readSU2(meshFileName::AbstractString)
-    py"""
-    import meshio
-    """
 
-    m = py"meshio.read"(meshFileName)
-    nodes      = m.points
-    triangles  = m.get_cells_type("triangle") .+ 1
-    edgeNodes  = m.get_cells_type("line") .+ 1
-    edgeBCs    = m.get_cell_data("su2:tag","line")
-    edges = hcat(edgeNodes,edgeBCs)
+    # meshio is not reading meshes from pointwise correctly
+    # py"""
+    # import meshio
+    # """
+    # m = py"meshio.read"(meshFileName)
+    # nodes      = m.points
+    # triangles  = m.get_cells_type("triangle") .+ 1
+    # edgeNodes  = m.get_cells_type("line") .+ 1
+    # edgeBCs    = m.get_cell_data("su2:tag","line")
+    # edges = hcat(edgeNodes,edgeBCs)
 
-    return Mesh2D(nodes,edges,triangles)
+    fid = open(meshFileName,"r")
+
+    # Process header
+    nextLine = getNextSu2Line(fid)
+    if cmp(uppercase(nextLine[1]),"NDIME=") != 0
+        error("Error processing NDIME in .su2 file.")
+    end
+    ndime = parse(Int32,nextLine[2])
+    if ndime != 2
+        error("NDIME should be 2 in .su2 file.")
+    end
+    
+    # Read triangles
+    nextLine = getNextSu2Line(fid)
+    if cmp(uppercase(nextLine[1]),"NELEM=") != 0
+        error("Error processing NELEM in .su2 file.")
+    end
+    nTriangles = parse(Int32,nextLine[2])
+    tri = Array{Int32}(undef,nTriangles,3)
+    for i = 1:nTriangles
+        nextLine = getNextSu2Line(fid)
+        if parse(Int32,nextLine[1]) != 5
+            error("Only triangle elements supported.")
+        end
+        tri[i,1] = parse(Int32,nextLine[2])
+        tri[i,2] = parse(Int32,nextLine[3])
+        tri[i,3] = parse(Int32,nextLine[4])
+    end
+    tri .+= 1 # convert base 0 to base 1
+    
+    # Read nodes
+    nextLine = getNextSu2Line(fid)
+    if cmp(uppercase(nextLine[1]),"NPOIN=") != 0
+        error("Error processing NPOIN in .su2 file.")
+    end
+    nNodes = parse(Int32,nextLine[2])
+    nodes = Array{Float64}(undef,nNodes,2)
+    for i = 1:nNodes
+        nextLine = getNextSu2Line(fid)
+        nodes[i,1] = parse(Float64,nextLine[1])
+        nodes[i,2] = parse(Float64,nextLine[2])
+    end
+    
+    # Read edges
+    Int321 = Int32(1)
+    edges = []
+    nextLine = getNextSu2Line(fid)
+    if cmp(uppercase(nextLine[1]),"NMARK=") != 0
+        error("Error processing NMARK in .su2 file.")
+    end
+    nBoundary = parse(Int32,nextLine[2])
+    for i = 1:nBoundary
+        nextLine = getNextSu2Line(fid)
+        if cmp(uppercase(nextLine[1]),"MARKER_TAG=") != 0
+            error("Error processing MARKER_TAG in .su2 file.")
+        end
+        nextLine = getNextSu2Line(fid)
+        if cmp(uppercase(nextLine[1]),"MARKER_ELEMS=") != 0
+            error("Error processing MARKER_ELEMS in .su2 file.")
+        end
+        nEdge = parse(Int32,nextLine[2])
+        for j = 1:nEdge
+            nextLine = getNextSu2Line(fid)
+            push!(edges,[parse(Int32,nextLine[2])+Int321 parse(Int32,nextLine[3])+Int321 i])
+        end
+    end
+    nEdges_ = size(edges,1)
+    edges_ = Array{Int32}(undef,nEdges_,3)
+    for i = 1:nEdges_
+        edges_[i,:] = edges[i]
+    end
+    
+
+    return Mesh2D(nodes,edges_,tri)
 end
 
 
