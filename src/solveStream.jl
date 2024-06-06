@@ -8,10 +8,10 @@ function solveStream(inputFileName::AbstractString)
     
     # Read input file
     inputData = TOML.parsefile(inputFileName)
-    
+
     # Echo input file
     TOML.print(inputData)
-    
+
     # Output dictionaries
     textOutput =  Dict() # Dict("KuttaJoukowski" => KuttaJoukowskiTextOut,"IntegratedPressure" => IntegratedPressureTextOut, "Adjoint" => AdjointTextOut)
     # pointOutput = Dict() # Dict("psi"=>ψ,"lamda"=>lamdaOut[1:end-1])
@@ -24,23 +24,23 @@ function solveStream(inputFileName::AbstractString)
     triangleElements = boring2D.TriangleElements(mesh)
     airfoilBoundary, farfieldBoundary, f, s = boring2D.processMeshBoundaries(mesh,inputData)
     gxγ = boring2D.computeGxγ(mesh,triangleElements,airfoilBoundary,f)
-    
+
     # Assemble coefficient matrix
     K = boring2D.assembleConvectionStiffness(mesh,triangleElements,1.0)
     g = boring2D.assembleKuttaConditionConstraint(mesh,inputData,triangleElements)
     esa = boring2D.assembleEsa(nDof,farfieldBoundary)
     A = boring2D.assembleA(K,g,esa,f,s)
-    
+
     # Assemble right-hand side
     ψsk = boring2D.assembleψsk(nDof,farfieldBoundary,inputData)
     b = boring2D.assembleB(K,ψsk,f,s)
-    
+
     # Stream function solution
     x = A\Array(b)
-    
+
     # Stream function values
     ψ = boring2D.recoverψ(x,ψsk,esa,f,s)
-    
+
     # Lift coefficient from Kutta-Joukowski
     Cl = (2/inputData["freestream"]["velocity"])* gxγ*x
     textOutput["KuttaJoukowski"] = Dict("Cl" => Cl)
@@ -60,26 +60,26 @@ function solveStream(inputFileName::AbstractString)
     # Adjoint solution
     ∂Cl∂x = (2/inputData["freestream"]["velocity"])* gxγ
     λ = transpose(A)\transpose(∂Cl∂x)
-    
+
     # Adjoint contour output
     fx = boring2D.getFxfromF(f)
-    lamdaOut = zeros(nDof+1)
-    lamdaOut[fx] = λ
-    cellOutput["λ"] = [lamdaOut]
-    
+    lamdaOut = zeros(nDof)
+    lamdaOut[f] = λ[1:end-1]
+    pointOutput["lambda"] = lamdaOut
+
     # Sensitivity wrt α
     ∂ψsk_∂α = boring2D.assemble_∂ψsk_∂α(nDof,farfieldBoundary,inputData)
     ∂r_∂α = boring2D.assemble_∂r_∂α(K,∂ψsk_∂α,f,s)
     ∂Cl_∂α = transpose(λ)*∂r_∂α # per radian | ∂Cl_∂α_deg = ∂Cl_∂α*pi/180
     textOutput["Adjoint"] = Dict("∂Cl_∂α_rad" => ∂Cl_∂α,"∂Cl_∂α_deg" => ∂Cl_∂α*pi/180)
-    
+
     # Shape sensitivities
     ∂g_∂b, ∂r_∂b = boring2D.computeShapePartials(mesh,x,inputData,size(airfoilBoundary.nodeIDs,1))
     ∂Cl_∂b = ∂g_∂b - transpose(λ)*∂r_∂b
-    
+
     # Length-normalized shape sensitivities to surface output file
     boring2D.surfaceOutput2Vtk(inputData["output"]["surfaceFile"],airfoilBoundary,∂Cl_∂b[:]./airfoilBoundary.nodeLength)
-    
+
     # Recover element output
     dVelX, dVelY = boring2D.recoverVelocities(lamdaOut,mesh,triangleElements)
     cellOutput["dVelX"] = [dVelX]
@@ -90,7 +90,7 @@ function solveStream(inputFileName::AbstractString)
     open(inputData["output"]["tomlFile"], "w") do io
         TOML.print(io, textOutput)
     end
-    
+
     # Volume output dictionaries and output file
     boring2D.writeSolution(inputData["output"]["volumeFile"],mesh,pointOutput,cellOutput)
 
