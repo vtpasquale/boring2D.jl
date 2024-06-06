@@ -64,6 +64,6 @@ function assembleConvectionStiffness(mesh::Mesh2D,triangleElements::Vector{Trian
         k_e = transpose(dNdX)*k*dNdX*area
         addMatrix!(Ks,k_e,dof)
     end
-    K = convertToSparseMatrix(Ks,nDof,nDof);
+    K = convertToSparseMatrix(Ks,nDof,nDof)
     return K
 end

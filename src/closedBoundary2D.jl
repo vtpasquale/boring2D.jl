@@ -2,28 +2,28 @@
 struct ClosedBoundary2D
 
     "[nEdges] Edge lengths"
-    edgeLength::Vector{Float64}
+    edgeLength::AbstractVector # Vector{Float64}
 
     "[2,nEdges] Surface tangent vector at each edge."
-    edgeTangent::Matrix{Float64}
+    edgeTangent::AbstractMatrix # Matrix{Float64}
 
     "[2,nEdges] Surface normal vector at each edge."
-    edgeNormal::Matrix{Float64}
+    edgeNormal::AbstractMatrix # Matrix{Float64}
 
     "[nNodes] node ID numbers along boundary"
     nodeIDs::Vector{Int64}
 
     "[nNodes] Edge length attributed to each node"
-    nodeLength::Vector{Float64}
+    nodeLength::AbstractVector # Vector{Float64}
 
     "[2,nNodes] Surface tangent vector at each node."
-    nodeTangent::Matrix{Float64}
+    nodeTangent::AbstractMatrix # Matrix{Float64}
 
     "[2,nNodes] Surface normal vector at each node."
-    nodeNormal::Matrix{Float64}
+    nodeNormal::AbstractMatrix # Matrix{Float64}
 
     "[nNodes,2] Position vector at each node."
-    nodeLocation::Matrix{Float64}
+    nodeLocation::AbstractMatrix # Matrix{Float64}
 
     "[nEdges] ID number of element adjacent to edge."
     adjacentElementID::Vector{Int64}
@@ -102,7 +102,7 @@ function processClosedBoundary2D(mesh::Mesh2D,boundaryID::Int64)
             1.0 0.0]
 
     # edge tangent and normal vectors
-    edgeTangent = zeros(2,nEdges)
+    edgeTangent = Matrix{Number}(undef,2,nEdges);
     edgeTangent[1,:] = cos.(theta)
     edgeTangent[2,:] = sin.(theta)
     edgeNormal = Rz90*edgeTangent
@@ -115,10 +115,6 @@ function processClosedBoundary2D(mesh::Mesh2D,boundaryID::Int64)
     nodeTangentSumNorm = sqrt.(nodeTangentSum[1,:].^2 + nodeTangentSum[2,:].^2)
     nodeTangent = nodeTangentSum./ transpose(nodeTangentSumNorm)
     nodeNormal = Rz90*nodeTangent
-
-    edgeTangent = zeros(2,nEdges)
-    edgeTangent[1,:] = cos.(theta)
-    edgeTangent[2,:] = sin.(theta)
 
     nodeLocation = mesh.nodes[nodeIDs,:]
 
@@ -159,7 +155,8 @@ function computeGxγ(mesh::Mesh2D,triangleElements::Vector{TriangleElements},bou
     
     adjacentElement = boundary.adjacentElementID
     
-    gψγ = zeros(nDof)
+    gψγ = Vector{Number}(undef,nDof);
+    gψγ[:] .= 0.0
     for i = 1:nEdges
         nodeDof = mesh.triangles[adjacentElement[i],:]
         

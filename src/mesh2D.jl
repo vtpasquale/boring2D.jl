@@ -3,7 +3,7 @@ using PyCall
 
 struct Mesh2D
     "[nNodes,2 Float64] Node locations (x,y)."
-    nodes::Matrix{Float64}
+    nodes::AbstractArray # Matrix{Float64}
 
     "[nNodes,3 Int32] Edge nodes numbers and boundary ID number."
     edges::Matrix{Int32}

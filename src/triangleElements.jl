@@ -4,8 +4,8 @@ struct TriangleElements
     # x::Vector{Float64} # [1,3] x node locations
     # y::Vector{Float64} # [1,3] y node locations
     # invJ::Matrix{Float64} # [2,2] inverse of Jacobian matrix (constant inside elements)
-    area::Float64 # [double] element area
-    dNdX::Matrix{Float64} # [2,3] Physical shape function derivatives - constant inside the element
+    area::Number # [double] element area
+    dNdX::AbstractArray # [2,3] Physical shape function derivatives - constant inside the element
 end
 
 """
@@ -21,12 +21,12 @@ function TriangleElements(mesh::Mesh2D)
     if mTri !=3; error("mTri~=3");     end
     
     # Shape function derivatives are constant inside the element
-    dNXi = Matrix{Float64}(undef,2,3);
+    dNXi = Matrix{Number}(undef,2,3);
     dNXi[1,:] = [-1, 1, 0]; # dNdxi  = [-1, 1, 0];
     dNXi[2,:] = [-1, 0, 1]; # dNdeta = [-1, 0, 1];
 
     # Process elements
-    detJinvJ = Array{Float64}(undef,2,2);
+    detJinvJ = Matrix{Number}(undef,2,2);
     triangleElements = Array{TriangleElements}(undef,nTri); # this doesn't have enough information to allocate memory
     for i = 1:nTri
         nodeIDs = mesh.triangles[i,:];

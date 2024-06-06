@@ -1,5 +1,6 @@
 using SparseArrays
 using TOML
+using ForwardDiff
 
 function solveStream(inputFileName::AbstractString)
     # inputFileName = "n0012_input.toml"
@@ -36,7 +37,7 @@ function solveStream(inputFileName::AbstractString)
     b = boring2D.assembleB(K,ψsk,f,s)
     
     # Stream function solution
-    x = A\Array(b)
+    x = convert(Matrix{Float64},A)\convert(Vector{Float64},b)
     
     # Stream function values
     ψ = boring2D.recoverψ(x,ψsk,esa,f,s)
@@ -100,26 +101,29 @@ end
 function computeCirculationMatrixAndResidual(shapeVar::Vector,mesh0::Mesh2D,x::Vector{Float64},inputData::Dict)
     # This function is intended for shape sensitivity analysis only. 
 
-    # mesh = boring2D.readMesh(inputData["mesh"]["fileName"])
-    mesh = deepcopy(mesh0)
-    nDof = size(mesh.nodes,1)
+    # Covert mesh nodes array to high-level type supported by dual
+    nDof = size(mesh0.nodes,1)
+    meshNodes = Array{Number}(undef, (nDof,2))
+    meshNodes[:,1] = mesh0.nodes[:,1] 
+    meshNodes[:,2] = mesh0.nodes[:,2]
 
-    # Placeholder boundary data for design update
-    airfoilBoundary1, farfieldBoundary1, f1, s1 = boring2D.processMeshBoundaries(mesh,inputData)
+    airfoilBoundary1, farfieldBoundary1, f1, s1 = boring2D.processMeshBoundaries(mesh0,inputData)
 
     # Deform mesh normals based on design variables
     if size(shapeVar,1) != size(airfoilBoundary1.nodeIDs,1)
         error("Check design variable definition. size(shapeVar,1) != size(airfoilBoundary.nodeIDs,1)")
     end
-    mesh.nodes[airfoilBoundary1.nodeIDs,1] += shapeVar.*airfoilBoundary1.nodeNormal[1,:]
-    mesh.nodes[airfoilBoundary1.nodeIDs,2] += shapeVar.*airfoilBoundary1.nodeNormal[2,:]
+    meshNodes[airfoilBoundary1.nodeIDs,1] += shapeVar.*airfoilBoundary1.nodeNormal[1,:]
+    meshNodes[airfoilBoundary1.nodeIDs,2] += shapeVar.*airfoilBoundary1.nodeNormal[2,:]
 
-    # Process mesh
-    nDof = size(mesh.nodes,1)
-    nEle = size(mesh.triangles,1)
+    # New dual-number-compatible mesh with design perturbations
+    mesh = boring2D.Mesh2D(meshNodes,mesh0.edges,mesh0.triangles)
+
     triangleElements = boring2D.TriangleElements(mesh)
-    airfoilBoundary, farfieldBoundary, f, s = boring2D.processMeshBoundaries(mesh,inputData)
-    gxγ = boring2D.computeGxγ(mesh,triangleElements,airfoilBoundary,f)
+    airfoilBoundary, farfieldBoundary, f, s = boring2D.processMeshBoundaries(mesh,inputData);
+    
+    # cirulation matrix
+    gxγ = boring2D.computeGxγ(mesh,triangleElements,airfoilBoundary,f);
 
     # Assemble coefficent matrix
     K = boring2D.assembleConvectionStiffness(mesh,triangleElements,1.0)
@@ -132,12 +136,83 @@ function computeCirculationMatrixAndResidual(shapeVar::Vector,mesh0::Mesh2D,x::V
     b = boring2D.assembleB(K,ψsk,f,s)
 
     # Residual
-    r = A*x-b
+    r = Array(A*x-b)
 
     return gxγ, r
 end
 
-function computeShapePartials(mesh0::Mesh2D,x::Vector{Float64},inputData::Dict,nVars::Int64)
+function computeCirculationMatrix(shapeVar::Vector,mesh0::Mesh2D,inputData::Dict)
+    # This function is intended for shape sensitivity analysis only. 
+
+    # Covert mesh nodes array to high-level type supported by dual
+    nDof = size(mesh0.nodes,1)
+    meshNodes = Array{Number}(undef, (nDof,2))
+    meshNodes[:,1] = mesh0.nodes[:,1] 
+    meshNodes[:,2] = mesh0.nodes[:,2]
+
+    airfoilBoundary1, farfieldBoundary1, f1, s1 = boring2D.processMeshBoundaries(mesh0,inputData)
+
+    # Deform mesh normals based on design variables
+    if size(shapeVar,1) != size(airfoilBoundary1.nodeIDs,1)
+        error("Check design variable definition. size(shapeVar,1) != size(airfoilBoundary.nodeIDs,1)")
+    end
+    meshNodes[airfoilBoundary1.nodeIDs,1] += shapeVar.*airfoilBoundary1.nodeNormal[1,:]
+    meshNodes[airfoilBoundary1.nodeIDs,2] += shapeVar.*airfoilBoundary1.nodeNormal[2,:]
+
+    # New dual-number-compatible mesh with design perturbations
+    mesh = boring2D.Mesh2D(meshNodes,mesh0.edges,mesh0.triangles)
+
+    triangleElements = boring2D.TriangleElements(mesh)
+    airfoilBoundary, farfieldBoundary, f, s = boring2D.processMeshBoundaries(mesh,inputData);
+    
+    # cirulation matrix
+    gxγ = boring2D.computeGxγ(mesh,triangleElements,airfoilBoundary,f)
+
+    return gxγ
+end
+
+function computeResidual(shapeVar::Vector,mesh0::Mesh2D,x::Vector{Float64},inputData::Dict)
+    # This function is intended for shape sensitivity analysis only. 
+
+    # Covert mesh nodes array to high-level type supported by dual
+    nDof = size(mesh0.nodes,1)
+    meshNodes = Array{Number}(undef, (nDof,2))
+    meshNodes[:,1] = mesh0.nodes[:,1] 
+    meshNodes[:,2] = mesh0.nodes[:,2]
+
+    airfoilBoundary1, farfieldBoundary1, f1, s1 = boring2D.processMeshBoundaries(mesh0,inputData)
+
+    # Deform mesh normals based on design variables
+    if size(shapeVar,1) != size(airfoilBoundary1.nodeIDs,1)
+        error("Check design variable definition. size(shapeVar,1) != size(airfoilBoundary.nodeIDs,1)")
+    end
+    meshNodes[airfoilBoundary1.nodeIDs,1] += shapeVar.*airfoilBoundary1.nodeNormal[1,:]
+    meshNodes[airfoilBoundary1.nodeIDs,2] += shapeVar.*airfoilBoundary1.nodeNormal[2,:]
+
+    # New dual-number-compatible mesh with design perturbations
+    mesh = boring2D.Mesh2D(meshNodes,mesh0.edges,mesh0.triangles)
+
+    triangleElements = boring2D.TriangleElements(mesh)
+    airfoilBoundary, farfieldBoundary, f, s = boring2D.processMeshBoundaries(mesh,inputData);
+
+    # Assemble coefficent matrix
+    # Converting sparse to dense for dual-number compatiblity - not a great solution
+    K = Array( boring2D.assembleConvectionStiffness(mesh,triangleElements,1.0) )
+    g = Array( boring2D.assembleKuttaConditionConstraint(mesh,inputData,triangleElements) )
+    esa = Array( boring2D.assembleEsa(nDof,farfieldBoundary) )
+    A = boring2D.assembleA(K,g,esa,f,s)
+
+    # Assemble right-hand side
+    ψsk = boring2D.assembleψsk(nDof,farfieldBoundary,inputData)
+    b = boring2D.assembleB(K,ψsk,f,s)
+
+    # Residual
+    r = Array(A*x-b)
+
+    return r
+end
+
+function computeShapePartialsFD(mesh0::Mesh2D,x::Vector{Float64},inputData::Dict,nVars::Int64)
     # Assemble partial derivatives w.r.t. shape design varaiables using finite difference
 
     # Check residual for zero-value design variables
@@ -165,6 +240,24 @@ function computeShapePartials(mesh0::Mesh2D,x::Vector{Float64},inputData::Dict,n
 
         ∂r_∂b[:,i] = (r.-r0) ./ Δ
     end
+
+    return ∂g_∂b, ∂r_∂b
+end
+
+
+function computeShapePartials(mesh0::Mesh2D,x::Vector{Float64},inputData::Dict,nVars::Int64)
+    # Assemble partial derivatives w.r.t. shape design varaiables using automatic differentiation
+
+    # Create unary functions for derivative calculation
+    gxγ(shapeVar::Vector) = computeCirculationMatrix(shapeVar,mesh0,inputData)
+    r(shapeVar::Vector)   = computeResidual(shapeVar,mesh0,x,inputData)
+
+    # Automatic differentiation
+    shapeVars = zeros(nVars)
+    ∂gxγ_∂b = ForwardDiff.jacobian(gxγ,shapeVars)
+    ∂r_∂b =   ForwardDiff.jacobian(r,  shapeVars)
+
+    ∂g_∂b = (2/inputData["freestream"]["velocity"]) * ( transpose(∂gxγ_∂b) *x )
 
     return ∂g_∂b, ∂r_∂b
 end
@@ -201,7 +294,8 @@ end
 function assembleKuttaConditionConstraint(mesh::Mesh2D,inputData::Dict,triangleElements::Vector{TriangleElements})
     nDof = size(mesh.nodes,1)
     zeroVyEle = inputData["mesh"]["kuttaConditionElementID"]
-    g = spzeros(nDof)
+    g = Vector{Number}(undef,nDof)
+    g[:] .= 0.0
     dof = mesh.triangles[zeroVyEle,:]
     coefficents = triangleElements[zeroVyEle].dNdX[1,:]
     g[dof] = coefficents
@@ -209,12 +303,13 @@ function assembleKuttaConditionConstraint(mesh::Mesh2D,inputData::Dict,triangleE
 end
 
 function assembleEsa(nDof::Int64,farfieldBoundary::ClosedBoundary2D)
-    esa = spzeros(nDof) # Vector of ones at fairfield dof
+    esa = Vector{Number}(undef,nDof)
+    esa[:] .= 0.0
     esa[farfieldBoundary.nodeIDs] .= 1.0
     return esa
 end
 
-function assembleA(K::SparseMatrixCSC{Float64},g::SparseVector{Float64},esa::SparseVector{Float64},f::BitVector,s::BitVector)
+function assembleA(K::AbstractMatrix,g::AbstractVector,esa::AbstractVector,f::BitVector,s::BitVector)
     keas = K[f,s]*esa[s]
     A = [K[f,f] keas; transpose(g[f]) 0.0]
     return A
@@ -225,7 +320,8 @@ function assembleψsk(nDof::Int64,farfieldBoundary::ClosedBoundary2D,inputData::
     alphaDeg = inputData["freestream"]["alphaDeg"]
     u0 = Vinf*cosd(alphaDeg)
     v0 = Vinf*sind(alphaDeg)
-    ψsk = spzeros(nDof) 
+    ψsk = Vector{Number}(undef,nDof)
+    ψsk[:] .= 0.0
     xs = farfieldBoundary.nodeLocation[:,1]
     ys = farfieldBoundary.nodeLocation[:,2]
     ψsk[farfieldBoundary.nodeIDs] .= v0.*xs - u0.*ys
@@ -237,24 +333,25 @@ function assemble_∂ψsk_∂α(nDof::Int64,farfieldBoundary::ClosedBoundary2D,i
     alphaDeg = inputData["freestream"]["alphaDeg"]
     du0 = -Vinf*sind(alphaDeg) # This is the derivative wrt alpha in radians, not degres
     dv0 =  Vinf*cosd(alphaDeg)
-    ∂ψsk_∂α = spzeros(nDof) 
+    ∂ψsk_∂α = Vector{Number}(undef,nDof)
+    ∂ψsk_∂α[:] .= 0.0
     xs = farfieldBoundary.nodeLocation[:,1]
     ys = farfieldBoundary.nodeLocation[:,2]
     ∂ψsk_∂α[farfieldBoundary.nodeIDs] .= dv0.*xs - du0.*ys
     return ∂ψsk_∂α
 end
 
-function assembleB(K::SparseMatrixCSC{Float64},ψsk::SparseVector{Float64},f::BitVector,s::BitVector)
+function assembleB(K::AbstractArray,ψsk::AbstractVector,f::BitVector,s::BitVector)
     b =  [-K[f,s]*ψsk[s]; 0.0] 
     return b
 end
 
-function assemble_∂r_∂α(K::SparseMatrixCSC{Float64},∂ψsk_∂α::SparseVector{Float64},f::BitVector,s::BitVector)
+function assemble_∂r_∂α(K::AbstractMatrix,∂ψsk_∂α::AbstractVector,f::BitVector,s::BitVector)
     ∂r_∂α =  [-K[f,s]*∂ψsk_∂α[s]; 0.0] 
     return ∂r_∂α
 end
 
-function recoverψ(x::Vector{Float64},ψsk::SparseVector{Float64},esa::SparseVector{Float64},f::BitVector,s::BitVector)
+function recoverψ(x::Vector{Float64},ψsk::AbstractArray,esa::AbstractArray,f::BitVector,s::BitVector)
     nDof = size(f,1)
     ψ = Array{Float64}(undef, nDof)
     ψ[f] = x[1:end-1]

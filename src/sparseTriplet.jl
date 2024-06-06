@@ -5,14 +5,14 @@ mutable struct SparseTriplet
         nTriplets::Int64 # Number of triplets
         i::Vector{Int64} # [paddedLength, 1] row indices
         j::Vector{Int64} # [paddedLength, 1] column indices
-        s::Vector{Float64} # [paddedLength, 1] matrix values
+        s::AbstractVector # [paddedLength, 1] matrix values
 end
 
 function SparseTriplet(paddedLengthIn::Int64)
     nTriplets = Int64(0);
     i = Vector{Int64}(undef,paddedLengthIn);
     j = Vector{Int64}(undef,paddedLengthIn); 
-    s = Vector{Float64}(undef,paddedLengthIn); 
+    s = Vector{Number}(undef,paddedLengthIn); 
     return SparseTriplet(paddedLengthIn,nTriplets,i,j,s);
 end
 
@@ -22,7 +22,7 @@ function padVectors!(sparseTriplet::SparseTriplet)
     newPaddedLength = 2*oldPaddedLength;
     i = Vector{Int64}(undef,newPaddedLength);
     j = Vector{Int64}(undef,newPaddedLength); 
-    s = Vector{Float64}(undef,newPaddedLength); 
+    s = Vector{Number}(undef,newPaddedLength); 
 
     i[1:oldPaddedLength] = sparseTriplet.i;
     j[1:oldPaddedLength] = sparseTriplet.j;
@@ -35,7 +35,7 @@ function padVectors!(sparseTriplet::SparseTriplet)
     return 0
 end
 
-function addMatrix!(sparseTriplet::SparseTriplet,M::Matrix{Float64},gDof::Vector{Int64})
+function addMatrix!(sparseTriplet::SparseTriplet,M::AbstractArray,gDof::Vector{Int64})
     # Adds matrix M with global DOF gDof to SparseTriplet
     iM,jM,m=findnz(sparse(M));
     
